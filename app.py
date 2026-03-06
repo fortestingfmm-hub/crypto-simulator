@@ -26,7 +26,7 @@ hide_streamlit_style = """
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# 2. 优化后的核心 HTML/JS 代码
+# 2. 核心 HTML/JS 代码
 HTML_CONTENT = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -353,13 +353,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <script>
         const TOP_COINS =['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP', 'PEPE', 'ORDI', 'WLD', 'AVAX', 'LINK', 'SUI', 'ADA'];
         
-        // 【核心优化 1】增加了 Binance 的官方 Data API vision 节点，解决跨域及 Streamlit 的屏蔽问题
-        const BINANCE_DOMAINS =[
-            'https://data-api.binance.vision', 
-            'https://api.binance.com', 
-            'https://api1.binance.com'
-        ];
-
         const state = {
             balance: 5000000, prices: {},
             positions:[], history:[], chatHistory:[], 
@@ -387,9 +380,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 const savedHist = localStorage.getItem('mock_history'); if(savedHist) state.history = JSON.parse(savedHist);
                 const savedChat = localStorage.getItem('mock_chat'); if(savedChat) state.chatHistory = JSON.parse(savedChat);
 
-                // 延迟初始化图表，确保 Streamlit iframe 的 DOM 宽度已渲染完毕
                 setTimeout(initTVChartSafe, 300); 
-                
                 renderPositions();
                 renderHistory();
                 renderChatHistory();
@@ -413,9 +404,18 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const badge = document.getElementById('net-status');
             setInterval(async () => {
                 let success = false;
-                for (let domain of BINANCE_DOMAINS) {
+                
+                // 【核心优化 1】价格数据防阻断代理序列
+                const PRICE_URLS =[
+                    'https://data-api.binance.vision/api/v3/ticker/price',
+                    'https://api.binance.com/api/v3/ticker/price',
+                    'https://api.mexc.com/api/v3/ticker/price', // MEXC API 对国内/国外都更友好
+                    `https://api.allorigins.win/raw?url=${encodeURIComponent('https://api.binance.com/api/v3/ticker/price')}` // 终极防墙免费代理
+                ];
+
+                for (let url of PRICE_URLS) {
                     try {
-                        const res = await fetch(`${domain}/api/v3/ticker/price`);
+                        const res = await fetch(url);
                         if (res.ok) {
                             const data = await res.json();
                             handlePriceData(data);
@@ -426,9 +426,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 if(success) {
                     badge.innerHTML = '<div class="pulse"></div> 🟢 行情直连畅通'; badge.style.color = 'var(--up-green)';
                 } else {
-                    badge.innerHTML = '🔴 自动穿透网络中...'; badge.style.color = 'var(--down-red)';
+                    badge.innerHTML = '🔴 数据穿透受阻...'; badge.style.color = 'var(--down-red)';
                 }
-            }, 1200); 
+            }, 1500); 
         }
 
         function handlePriceData(dataArray) {
@@ -459,15 +459,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             setTimeout(() => { if(el) el.style.color = ''; }, 200);
         }
 
-        // ================= 【核心优化 2】K线图表防崩溃引擎 =================
         function initTVChartSafe() {
             try {
                 const container = document.getElementById('tvchart');
                 if (!container) return;
                 
-                // 解决 Streamlit 初始宽度为 0 的崩溃问题
-                let initWidth = container.clientWidth;
-                if (initWidth === 0) initWidth = window.innerWidth > 600 ? 560 : window.innerWidth - 32;
+                // 【核心优化 2】强制获取准确的容器宽度，解决白屏问题
+                let initWidth = container.offsetWidth || window.innerWidth - 32;
+                if (initWidth < 100) initWidth = window.innerWidth > 600 ? 560 : window.innerWidth - 32;
 
                 state.chartInst = LightweightCharts.createChart(container, {
                     width: initWidth,
@@ -478,20 +477,15 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                     rightPriceScale: { borderColor: 'rgba(43,49,57,0.5)' },
                     timeScale: { borderColor: 'rgba(43,49,57,0.5)', timeVisible: true, secondsVisible: false },
                 });
+                
                 state.candleSeries = state.chartInst.addCandlestickSeries({ upColor: '#0ECB81', downColor: '#F6465D', borderVisible: false, wickUpColor: '#0ECB81', wickDownColor: '#F6465D' });
                 
                 fetchChartHistory(); 
 
-                // 监听窗口大小变化以重绘图表
                 new ResizeObserver(entries => {
                     if (entries.length === 0 || entries[0].target.clientWidth === 0) return;
                     state.chartInst.resize(entries[0].target.clientWidth, 320);
                 }).observe(container);
-
-                // 双保险：1秒后再强制自适应一次，以防 iframe 延迟加载
-                setTimeout(() => {
-                    if(container.clientWidth > 0) state.chartInst.resize(container.clientWidth, 320);
-                }, 1000);
 
             } catch (error) { console.error("图表初始化失败:", error); }
         }
@@ -503,60 +497,90 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             fetchChartHistory();
         }
 
-        function changeTF(tf, el) { document.querySelectorAll('.tf-btn').forEach(btn => btn.classList.remove('active')); el.classList.add('active'); state.chartTF = tf; fetchChartHistory(); }
+        function changeTF(tf, el) { 
+            document.querySelectorAll('.tf-btn').forEach(btn => btn.classList.remove('active')); 
+            el.classList.add('active'); 
+            state.chartTF = tf; 
+            fetchChartHistory(); 
+        }
 
         async function fetchChartHistory() {
             if(!state.candleSeries) return;
-            const symbol = state.chartCoin + 'USDT'; const interval = state.chartTF;
+            const symbol = state.chartCoin + 'USDT'; 
+            const interval = state.chartTF;
             let data = null;
-            for (let domain of BINANCE_DOMAINS) {
-                try {
-                    const res = await fetch(`${domain}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=150`);
-                    if (res.ok) { const temp = await res.json(); if (Array.isArray(temp) && temp.length > 0) { data = temp; break; } }
-                } catch(e) {}
-            }
-            if (data) {
-                // 【核心优化 3】使用 Math.floor 确保时间戳严格为整数，避免图表引擎因小数点抛错
-                const formatted = data.map(d => ({ 
-                    time: Math.floor(d[0] / 1000), 
-                    open: parseFloat(d[1]), 
-                    high: parseFloat(d[2]), 
-                    low: parseFloat(d[3]), 
-                    close: parseFloat(d[4]) 
-                }));
-                
-                // 去重及确保时间升序 (LightweightCharts 崩溃常见原因)
-                const uniqueData =[];
-                let lastTime = 0;
-                formatted.forEach(item => {
-                    if (item.time > lastTime) {
-                        uniqueData.push(item);
-                        lastTime = item.time;
-                    }
-                });
+            
+            // 【核心优化 3】K线数据最强防屏蔽节点序列（包含备用交易所及跨域代理）
+            const KLINE_URLS =[
+                `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=150`,
+                `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=150`,
+                `https://api.mexc.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=150`,
+                `https://api.allorigins.win/raw?url=${encodeURIComponent('https://api.binance.com/api/v3/klines?symbol='+symbol+'&interval='+interval+'&limit=150')}`
+            ];
 
+            for (let url of KLINE_URLS) {
+                try {
+                    const res = await fetch(url);
+                    if (res.ok) { 
+                        const temp = await res.json(); 
+                        if (Array.isArray(temp) && temp.length > 0) { data = temp; break; } 
+                    }
+                } catch(e) { console.warn("节点拉取失败，自动切换:", url); }
+            }
+
+            if (!data) {
+                showToast(`⚠️ ${interval} K线数据被网络拦截，请刷新或切换网络重试`, 'error');
+                return;
+            }
+
+            // 【核心优化 4】强制清洗数据，防止相同时间戳导致图表完全崩溃罢工
+            const formatted = data.map(d => ({ 
+                time: Math.floor(d[0] / 1000), 
+                open: parseFloat(d[1]), 
+                high: parseFloat(d[2]), 
+                low: parseFloat(d[3]), 
+                close: parseFloat(d[4]) 
+            }));
+            
+            const uniqueData =[];
+            let lastTime = -1;
+            
+            formatted.forEach(item => {
+                if (item.time > lastTime && !isNaN(item.time)) {
+                    uniqueData.push(item);
+                    lastTime = item.time;
+                }
+            });
+
+            if (uniqueData.length > 0) {
                 try {
                     state.candleSeries.setData(uniqueData);
                     state.lastCandle = uniqueData[uniqueData.length - 1]; 
-                    state.chartInst.timeScale().fitContent(); // 让K线居中充满
-                } catch(e) { console.error("设置K线数据出错:", e); }
+                    state.chartInst.timeScale().fitContent();
+                } catch(e) { console.error("K线渲染引擎报错:", e); }
             }
         }
 
         function updateRealtimeCandle(price) {
             if(!state.lastCandle || !state.candleSeries) return;
-            const now = Math.floor(Date.now() / 1000); const tfSeconds = { '1m': 60, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 }[state.chartTF];
-            if(now >= state.lastCandle.time + tfSeconds) state.lastCandle = { time: state.lastCandle.time + tfSeconds, open: price, high: price, low: price, close: price };
-            else { state.lastCandle.high = Math.max(state.lastCandle.high, price); state.lastCandle.low = Math.min(state.lastCandle.low, price); state.lastCandle.close = price; }
-            try {
-                state.candleSeries.update(state.lastCandle);
-            } catch(e) {}
+            const now = Math.floor(Date.now() / 1000); 
+            const tfSeconds = { '1m': 60, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 }[state.chartTF];
+            
+            if(now >= state.lastCandle.time + tfSeconds) {
+                state.lastCandle = { time: state.lastCandle.time + tfSeconds, open: price, high: price, low: price, close: price };
+            } else { 
+                state.lastCandle.high = Math.max(state.lastCandle.high, price); 
+                state.lastCandle.low = Math.min(state.lastCandle.low, price); 
+                state.lastCandle.close = price; 
+            }
+            
+            try { state.candleSeries.update(state.lastCandle); } catch(e) {}
+            
             const titlePrice = document.getElementById('chart-current-price');
             titlePrice.innerText = '$' + (price < 1 ? price.toFixed(4) : price.toFixed(2));
             titlePrice.style.color = state.lastCandle.close >= state.lastCandle.open ? 'var(--up-green)' : 'var(--down-red)';
         }
 
-        // ================= 其余实战量化逻辑 =================
         function updateEquityUI() {
             let totalMarginUsed = 0, totalUnrealizedPNL = 0;
             state.positions.forEach(p => {
@@ -571,7 +595,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             
             if(equity <= 0) document.getElementById('total-equity').style.color = 'var(--down-red)';
             else document.getElementById('total-equity').style.color = 'var(--primary)';
-            
             return available;
         }
 
@@ -882,7 +905,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             }
         }
 
-        // 【核心优化 4】切换 TAB 时强制重新读取 DOM 宽度刷新图表，否则切换回来就是白屏
         function switchTab(tabId, el) {
             document.querySelectorAll('.tab-content, .tab-item').forEach(e => e.classList.remove('active'));
             document.getElementById(tabId).classList.add('active'); el.classList.add('active');
