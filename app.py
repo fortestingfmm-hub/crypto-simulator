@@ -5,6 +5,7 @@ import time
 import json
 import os
 import hashlib
+import uuid  # 新增：用于生成免密登录的唯一令牌
 from openai import OpenAI
 
 # ==========================================
@@ -21,7 +22,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 本地数据库引擎
+# 1. 本地数据库与 Token 引擎
 # ==========================================
 DATA_FILE = "trading_data.json"
 
@@ -47,14 +48,31 @@ def sync_current_user_data():
         save_db(db)
 
 # ==========================================
-# 2. 账号注册与登录系统
+# 2. 账号注册与【免密自动登录】系统
 # ==========================================
+db = load_db()
+
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
+# 🌟 核心升级：静默拦截器，检测网址中是否带有专属 Token
+url_token = st.query_params.get("token")
+if url_token and not st.session_state.logged_in:
+    for user, u_data in db["users"].items():
+        if u_data.get("session_token") == url_token:
+            st.session_state.logged_in = True
+            st.session_state.username = user
+            st.session_state.balance = u_data["balance"]
+            st.session_state.positions = u_data["positions"]
+            st.session_state.chat_history = []
+            st.session_state.market_summary = "暂无最新行情"
+            # 自动登录成功，直接放行
+            break
+
+# 如果没有 Token 或者 Token 失效，则展示登录界面
 if not st.session_state.logged_in:
-    st.markdown('<div class="title-text">⚡ Crypto 模拟引擎系统</div>', unsafe_allow_html=True)
-    st.caption("请先登录或注册账号以保存您的交易数据")
+    st.markdown('<div class="title-text">⚡ Crypto 模拟引擎</div>', unsafe_allow_html=True)
+    st.caption("首次登录后，请将带 Token 的网址加入收藏夹，即可永久免密登录。")
     
     tab_login, tab_register = st.tabs(["🔑 登录", "📝 注册新账号"])
     
@@ -65,16 +83,23 @@ if not st.session_state.logged_in:
             submit_login = st.form_submit_button("登 录", use_container_width=True)
             
             if submit_login:
-                db = load_db()
                 if l_user in db["users"] and db["users"][l_user]["password"] == hash_password(l_pass):
+                    # 登录成功，生成专属身份令牌 (UUID)
+                    new_token = str(uuid.uuid4())
+                    db["users"][l_user]["session_token"] = new_token
+                    save_db(db)
+                    
+                    # 将 Token 注入到当前网址栏中
+                    st.query_params["token"] = new_token
+                    
                     st.session_state.logged_in = True
                     st.session_state.username = l_user
                     st.session_state.balance = db["users"][l_user]["balance"]
                     st.session_state.positions = db["users"][l_user]["positions"]
                     st.session_state.chat_history = []
                     st.session_state.market_summary = "暂无最新行情"
-                    st.success("登录成功！正在进入交易终端...")
-                    time.sleep(1)
+                    st.success("✅ 登录成功！已为您生成专属免密网址，正在进入...")
+                    time.sleep(1.5)
                     st.rerun()
                 else:
                     st.error("用户名或密码错误！")
@@ -86,19 +111,18 @@ if not st.session_state.logged_in:
             submit_register = st.form_submit_button("注 册", use_container_width=True)
             
             if submit_register:
-                db = load_db()
                 if not r_user or not r_pass:
                     st.warning("用户名和密码不能为空！")
                 elif r_user in db["users"]:
                     st.error("该用户名已被注册，请换一个！")
                 else:
-                    db["users"][r_user] = {"password": hash_password(r_pass), "balance": 5000000.0, "positions": []}
+                    db["users"][r_user] = {"password": hash_password(r_pass), "balance": 5000000.0, "positions": [], "session_token": ""}
                     save_db(db)
-                    st.success("注册成功！请切换到【登录】面板进行登录。")
+                    st.success("🎉 注册成功！请切换到【登录】面板进行登录。")
     st.stop() 
 
 # ==========================================
-# 3. 核心网络引擎 (专为国内网络环境优化)
+# 3. 核心网络引擎与登出功能
 # ==========================================
 def reset_balance():
     st.session_state.balance = 5000000.0
@@ -107,15 +131,15 @@ def reset_balance():
     st.toast("✅ 资金已重置为 5,000,000 USDT！", icon="💰")
 
 def logout():
+    # 退出时清空网址栏的 Token，防止他人拿走手机直接进入
+    st.query_params.clear()
     st.session_state.clear()
     st.rerun()
 
-# 节点列表：首选对国内友好的 MEXC 接口，其次是币安备用节点
 API_NODES = ['https://api.mexc.com', 'https://data-api.binance.vision']
 
 @st.cache_data(ttl=3600) 
 def get_all_usdt_symbols():
-    """获取全市场币种（缓存1小时，极度节省网络请求）"""
     for url in API_NODES:
         try:
             res = requests.get(f"{url}/api/v3/exchangeInfo", timeout=8)
@@ -125,12 +149,11 @@ def get_all_usdt_symbols():
             return main_coins + [s for s in symbols if s not in main_coins]
         except:
             continue
-    return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"] # 极限断网保底
+    return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"]
 
 all_symbols = get_all_usdt_symbols()
 
 def get_single_price(symbol):
-    """下单瞬间精准获取单币价格（带重试机制）"""
     for url in API_NODES:
         try:
             res = requests.get(f"{url}/api/v3/ticker/price?symbol={symbol}", timeout=5)
@@ -174,7 +197,6 @@ st.divider()
 # ==========================================
 tab_market, tab_trade, tab_assets = st.tabs(["📊 行情", "📈 交易", "💼 资产持仓"])
 
-# --- 模块 1：全市场行情 (放宽至 8 秒刷新，极度抗网络波动) ---
 @st.fragment(run_every=8)
 def render_market_tab():
     success = False
@@ -184,8 +206,6 @@ def render_market_tab():
             if res.status_code == 200 and isinstance(res.json(), list):
                 data = res.json()
                 usdt_data = [d for d in data if d['symbol'].endswith('USDT')]
-                
-                # 兼容不同API的字段命名差异
                 sort_key = 'quoteVolume' if 'quoteVolume' in usdt_data[0] else 'volume'
                 usdt_data.sort(key=lambda x: float(x.get(sort_key, 0)), reverse=True)
                 
@@ -210,11 +230,9 @@ def render_market_tab():
 with tab_market:
     render_market_tab()
 
-# --- 模块 2：交易面板 ---
 with tab_trade:
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
     
-    #  TradingView 图表（TV 的国内连通率一般还可以，如果图出不来，建议挂一下后台梯子）
     st.components.v1.html(
         f"""
         <div class="tradingview-widget-container" style="height:350px;width:100%">
@@ -259,14 +277,12 @@ with tab_trade:
             else:
                 st.error("失败：余额不足或网络拥堵未获取到价格")
 
-# --- 模块 3：资产与持仓 (放宽至 5 秒自动结算，减少卡顿) ---
 @st.fragment(run_every=5)
 def render_positions_and_pnl():
     if not st.session_state.positions:
         st.info("📦 当前暂无持仓")
         return
 
-    # 拉取当前持仓的最新价 (带重试引擎)
     prices_dict = {}
     for url in API_NODES:
         try:
@@ -274,7 +290,7 @@ def render_positions_and_pnl():
             if res.status_code == 200:
                 for item in res.json():
                     prices_dict[item['symbol']] = float(item['price'])
-                break # 获取成功直接跳出循环
+                break 
         except:
             continue
 
