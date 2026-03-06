@@ -28,43 +28,79 @@ def reset_balance():
 # ==========================================
 # 1. 核心功能：获取实时行情 (修复了云端报错)
 # ==========================================
+# ==========================================
+# 1. 核心功能：获取实时行情 (修复云端IP被墙问题)
+# ==========================================
 def get_real_market_data():
-    """获取所有关注币种的市场概况"""
-    url = 'https://api.binance.com/api/v3/ticker/24hr'
+    """获取所有关注币种的市场概况，增加多节点轮询与容错"""
+    # 准备多个币安备用数据节点，防止单个节点屏蔽云服务器IP
+    base_urls = [
+        'https://data-api.binance.vision',  # 币安官方公开数据节点（最不容易被墙）
+        'https://api1.binance.com',         # 备用节点 1
+        'https://api.binance.com'           # 主节点
+    ]
     symbols = '["BTCUSDT","ETHUSDT","SOLUSDT","DOGEUSDT","BNBUSDT","XRPUSDT"]'
     
-    try:
-        # ⚠️ 修复点1：移除了本地代理。Streamlit Cloud 服务器在海外，直接请求即可畅通无阻！
-        response = requests.get(f"{url}?symbols={symbols}", timeout=5)
-        
-        data = response.json()
-        market_list = []
-        summary_str = ""
-        prices_dict = {}
-        
-        for item in data:
-            symbol_raw = item['symbol']
-            coin = symbol_raw.replace("USDT", "")
-            price = float(item['lastPrice'])
-            change = f"{float(item['priceChangePercent']):.2f}%"
+    for base_url in base_urls:
+        try:
+            url = f"{base_url}/api/v3/ticker/24hr"
+            response = requests.get(f"{url}?symbols={symbols}", timeout=5)
             
-            market_list.append({"币种": f"{coin}/USDT", "最新价 ($)": round(price, 4), "24h涨跌幅": change})
-            summary_str += f"{coin}价格{round(price, 2)}，涨跌幅{change}；"
-            prices_dict[symbol_raw] = price 
+            # 如果 HTTP 状态码不是 200 (比如 403 被拒绝)，直接尝试下一个节点
+            if response.status_code != 200:
+                continue
+                
+            data = response.json()
             
-        st.session_state.market_summary = summary_str
-        st.session_state.latest_prices = prices_dict
-        return pd.DataFrame(market_list)
-    except Exception as e:
-        return pd.DataFrame({"错误": [f"API 请求失败: {str(e)}"]})
+            # 核心防御：严格校验返回的数据必须是列表 (List)
+            # 如果是字典 (Dict)，说明币安返回了包含 msg 的错误信息，跳过
+            if not isinstance(data, list):
+                continue
+                
+            market_list = []
+            summary_str = ""
+            prices_dict = {}
+            
+            for item in data:
+                symbol_raw = item['symbol']
+                coin = symbol_raw.replace("USDT", "")
+                price = float(item['lastPrice'])
+                change = f"{float(item['priceChangePercent']):.2f}%"
+                
+                market_list.append({"币种": f"{coin}/USDT", "最新价 ($)": round(price, 4), "24h涨跌幅": change})
+                summary_str += f"{coin}价格{round(price, 2)}，涨跌幅{change}；"
+                prices_dict[symbol_raw] = price 
+                
+            st.session_state.market_summary = summary_str
+            st.session_state.latest_prices = prices_dict
+            return pd.DataFrame(market_list)
+            
+        except Exception:
+            # 发生任何网络超时，静默失败，交给循环去尝试下一个节点
+            continue
+            
+    # 如果所有节点全部阵亡，返回友好的错误提示面板
+    return pd.DataFrame({"错误": ["🚨 API 获取失败：云服务器 IP 被拦截或网络极差，请稍后再试。"]})
+
 
 def get_single_price(symbol):
-    """下单瞬间获取极速精准价格，防止买不进去"""
-    try:
-        res = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=3)
-        return float(res.json()['price'])
-    except:
-        return 0.0
+    """下单瞬间获取极速精准价格，加入多节点轮询防御"""
+    base_urls = [
+        'https://data-api.binance.vision',
+        'https://api1.binance.com',
+        'https://api.binance.com'
+    ]
+    for base_url in base_urls:
+        try:
+            res = requests.get(f"{base_url}/api/v3/ticker/price?symbol={symbol}", timeout=3)
+            if res.status_code == 200:
+                data = res.json()
+                if 'price' in data:
+                    return float(data['price'])
+        except Exception:
+            continue
+    # 全部失败则返回 0.0，触发主程序的拦截
+    return 0.0
 
 # ==========================================
 # 2. 侧边栏与 AI 悬浮窗
@@ -262,3 +298,4 @@ with tab_futures:
                     st.rerun()
                 else:
                     st.error("余额不足，无法开仓！")
+
