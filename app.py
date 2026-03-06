@@ -5,10 +5,21 @@ import time
 from openai import OpenAI
 
 # ==========================================
-# 0. 页面全局配置
+# 0. 页面全局配置 (适配手机端)
 # ==========================================
-st.set_page_config(page_title="Crypto 极速模拟交易终端", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Crypto 模拟终端", layout="centered", initial_sidebar_state="collapsed")
 
+# 优化手机端间距、大字号余额
+st.markdown("""
+<style>
+    .block-container { padding-top: 1.5rem; padding-bottom: 5rem; }
+    .balance-text { font-size: 1.8rem; font-weight: bold; color: #0ecb81; }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# 1. 初始化系统状态
+# ==========================================
 if 'balance' not in st.session_state:
     st.session_state.balance = 5000000.0  
 if 'positions' not in st.session_state:
@@ -17,285 +28,221 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'market_summary' not in st.session_state:
     st.session_state.market_summary = "暂无最新行情"
-if 'latest_prices' not in st.session_state:
-    st.session_state.latest_prices = {}   
 
 def reset_balance():
     st.session_state.balance = 5000000.0
     st.session_state.positions = []
-    st.toast("✅ 余额已重置为 5,000,000 USDT！", icon="💰")
+    st.toast("✅ 资金已重置为 5,000,000 USDT！", icon="💰")
 
 # ==========================================
-# 1. 核心功能：获取实时行情 (修复了云端报错)
+# 2. 全市场币种获取 (缓存防卡顿)
 # ==========================================
-# ==========================================
-# 1. 核心功能：获取实时行情 (修复云端IP被墙问题)
-# ==========================================
-def get_real_market_data():
-    """获取所有关注币种的市场概况，增加多节点轮询与容错"""
-    # 准备多个币安备用数据节点，防止单个节点屏蔽云服务器IP
-    base_urls = [
-        'https://data-api.binance.vision',  # 币安官方公开数据节点（最不容易被墙）
-        'https://api1.binance.com',         # 备用节点 1
-        'https://api.binance.com'           # 主节点
-    ]
-    symbols = '["BTCUSDT","ETHUSDT","SOLUSDT","DOGEUSDT","BNBUSDT","XRPUSDT"]'
-    
-    for base_url in base_urls:
-        try:
-            url = f"{base_url}/api/v3/ticker/24hr"
-            response = requests.get(f"{url}?symbols={symbols}", timeout=5)
-            
-            # 如果 HTTP 状态码不是 200 (比如 403 被拒绝)，直接尝试下一个节点
-            if response.status_code != 200:
-                continue
-                
-            data = response.json()
-            
-            # 核心防御：严格校验返回的数据必须是列表 (List)
-            # 如果是字典 (Dict)，说明币安返回了包含 msg 的错误信息，跳过
-            if not isinstance(data, list):
-                continue
-                
-            market_list = []
-            summary_str = ""
-            prices_dict = {}
-            
-            for item in data:
-                symbol_raw = item['symbol']
-                coin = symbol_raw.replace("USDT", "")
-                price = float(item['lastPrice'])
-                change = f"{float(item['priceChangePercent']):.2f}%"
-                
-                market_list.append({"币种": f"{coin}/USDT", "最新价 ($)": round(price, 4), "24h涨跌幅": change})
-                summary_str += f"{coin}价格{round(price, 2)}，涨跌幅{change}；"
-                prices_dict[symbol_raw] = price 
-                
-            st.session_state.market_summary = summary_str
-            st.session_state.latest_prices = prices_dict
-            return pd.DataFrame(market_list)
-            
-        except Exception:
-            # 发生任何网络超时，静默失败，交给循环去尝试下一个节点
-            continue
-            
-    # 如果所有节点全部阵亡，返回友好的错误提示面板
-    return pd.DataFrame({"错误": ["🚨 API 获取失败：云服务器 IP 被拦截或网络极差，请稍后再试。"]})
+@st.cache_data(ttl=600) # 缓存10分钟，避免每次刷新重新拉取几千个币种列表
+def get_all_usdt_symbols():
+    """获取币安所有正在交易的 USDT 合约/现货全市场币种"""
+    try:
+        res = requests.get("https://data-api.binance.vision/api/v3/exchangeInfo", timeout=5)
+        data = res.json()
+        # 过滤出所有以 USDT 结尾且状态为 TRADING 的币种
+        symbols = [s['symbol'] for s in data['symbols'] if s['symbol'].endswith('USDT') and s['status'] == 'TRADING']
+        # 把主流币排在前面
+        main_coins = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT"]
+        others = [s for s in symbols if s not in main_coins]
+        return main_coins + others
+    except:
+        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"] # 断网时的后备方案
 
+all_symbols = get_all_usdt_symbols()
 
 def get_single_price(symbol):
-    """下单瞬间获取极速精准价格，加入多节点轮询防御"""
-    base_urls = [
-        'https://data-api.binance.vision',
-        'https://api1.binance.com',
-        'https://api.binance.com'
-    ]
-    for base_url in base_urls:
-        try:
-            res = requests.get(f"{base_url}/api/v3/ticker/price?symbol={symbol}", timeout=3)
-            if res.status_code == 200:
-                data = res.json()
-                if 'price' in data:
-                    return float(data['price'])
-        except Exception:
-            continue
-    # 全部失败则返回 0.0，触发主程序的拦截
-    return 0.0
+    """下单瞬间精准获取单币价格"""
+    try:
+        res = requests.get(f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}", timeout=3)
+        return float(res.json().get('price', 0))
+    except:
+        return 0.0
 
 # ==========================================
-# 2. 侧边栏与 AI 悬浮窗
+# 3. 顶部导航、全局余额与 AI
 # ==========================================
-with st.sidebar:
-    st.header("⚙️ 系统设置")
-    api_key = st.text_input("🔑 DeepSeek API Key", type="password")
-    st.divider()
-    st.header("💳 资产管理")
-    st.metric(label="可用体验金 (USDT)", value=f"{st.session_state.balance:,.2f}")
-    st.button("🔄 重置 500 万体验金", on_click=reset_balance, use_container_width=True)
-
-col_header, col_ai = st.columns([4, 1])
-with col_header:
-    st.title("⚡ Crypto 极速模拟交易面板")
-
+col_title, col_ai = st.columns([3, 1])
+with col_title:
+    st.markdown("### ⚡ Crypto 模拟引擎")
 with col_ai:
-    st.write("") 
-    with st.popover("🤖 唤醒 DeepSeek 顾问", use_container_width=True):
-        st.markdown("### DeepSeek 智能分析")
-        chat_container = st.container(height=350)
-        with chat_container:
-            for msg in st.session_state.chat_history:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-        
+    with st.popover("🤖 AI", use_container_width=True):
+        api_key = st.text_input("DeepSeek Key", type="password", placeholder="填入 API Key")
         user_input = st.chat_input("向 AI 提问...")
-        if user_input:
-            if not api_key:
-                st.error("请先输入 API Key！")
-            else:
-                st.session_state.chat_history.append({"role": "user", "content": user_input})
-                with chat_container:
-                    with st.chat_message("user"):
-                        st.markdown(user_input)
-                    with st.chat_message("assistant"):
-                        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-                        system_prompt = f"你是一个专业的加密货币交易顾问。现在的实时市场行情是：{st.session_state.market_summary}。请结合上述真实价格数据回答问题，若涉及高倍杠杆务必提醒强平风险。"
-                        messages = [{"role": "system", "content": system_prompt}] + st.session_state.chat_history
-                        try:
-                            response = client.chat.completions.create(model="deepseek-chat", messages=messages, stream=True)
-                            full_response = st.write_stream(response)
-                            st.session_state.chat_history.append({"role": "assistant", "content": full_response})
-                        except Exception as e:
-                            st.error(f"API 请求失败: {e}")
+        if user_input and api_key:
+            st.session_state.chat_history.append({"role": "user", "content": user_input})
+            try:
+                client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+                prompt = "你是交易顾问。简短回答，提醒风险。"
+                messages = [{"role": "system", "content": prompt}] + st.session_state.chat_history
+                resp = client.chat.completions.create(model="deepseek-chat", messages=messages, stream=True)
+                full_res = st.write_stream(resp)
+                st.session_state.chat_history.append({"role": "assistant", "content": full_res})
+            except:
+                st.error("API 异常")
+
+# 🚨 全局高亮余额显示，无论切到哪个 Tab 都能看到！
+st.markdown(f'<div class="balance-text">💰 余额: {st.session_state.balance:,.2f} U</div>', unsafe_allow_html=True)
+st.divider()
 
 # ==========================================
-# 3. 主界面：现货与合约分栏
+# 4. 移动端优化三大核心板块
 # ==========================================
-tab_market, tab_futures = st.tabs(["📊 实时现货概况", "📈 模拟合约 (1000x 引擎)"])
+tab_market, tab_trade, tab_assets = st.tabs(["📊 行情", "📈 交易", "💼 资产与持仓"])
 
-# 获取最新全局数据以供展示
-_ = get_real_market_data()
+# --- 模块 1：全市场行情 (使用 Fragment 实现每 3 秒无感自动刷新) ---
+@st.fragment(run_every=3)
+def render_market_tab():
+    try:
+        # 抓取全网 24h 行情
+        res = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=3)
+        data = res.json()
+        # 过滤并排序（按成交量排名前 150，防止手机浏览器卡顿）
+        usdt_data = [d for d in data if d['symbol'].endswith('USDT')]
+        usdt_data.sort(key=lambda x: float(x['quoteVolume']), reverse=True)
+        
+        market_list = []
+        for item in usdt_data[:150]: 
+            coin = item['symbol'].replace("USDT", "")
+            market_list.append({
+                "全市场币种": f"{coin}/USDT", 
+                "最新价($)": round(float(item['lastPrice']), 6), 
+                "24h涨跌": f"{float(item['priceChangePercent']):.2f}%"
+            })
+        st.caption("🔄 行情每 3 秒自动更新 (按全网成交量排序)")
+        st.dataframe(pd.DataFrame(market_list), use_container_width=True, hide_index=True)
+    except:
+        st.error("网络异常，拉取全市场行情失败。")
 
 with tab_market:
-    st.subheader("全网实时行情")
-    # ⚠️ 修复点2：移除了会导致页面狂闪的 auto_refresh 循环代码。提供一个手动刷新按钮。
-    if st.button("🔄 获取最新现货报价"):
-        st.rerun()
-        
-    real_data_df = get_real_market_data()
-    if not real_data_df.empty and "错误" not in real_data_df.columns:
-        st.dataframe(real_data_df, use_container_width=True, hide_index=True)
-    else:
-        st.error(real_data_df.iloc[0]["错误"])
+    render_market_tab()
 
-with tab_futures:
-    col_chart, col_trade = st.columns([2, 1])
+# --- 模块 2：交易面板 (图表与下单) ---
+with tab_trade:
+    # 下拉框现在支持全市场几千个币种！格式化显示为 BTC/USDT
+    tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
     
-    trade_symbol_display = st.selectbox("选择交易对", ["BTC-USDT", "ETH-USDT", "SOL-USDT", "DOGE-USDT"])
-    tv_symbol = trade_symbol_display.replace("-", "") # 转换为 Binance 格式: BTCUSDT
+    st.components.v1.html(
+        f"""
+        <div class="tradingview-widget-container" style="height:350px;width:100%">
+          <div id="tv_{tv_symbol}" style="height:calc(100% - 32px);width:100%"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117", "container_id": "tv_{tv_symbol}"}});
+        </script></div>
+        """, height=350
+    )
     
-    with col_chart:
-        # TradingView K线图 (自带 WebSocket，不刷新网页也能实时跳动)
-        st.components.v1.html(
-            f"""
-            <div class="tradingview-widget-container" style="height:450px;width:100%">
-              <div id="tradingview_{tv_symbol}" style="height:calc(100% - 32px);width:100%"></div>
-              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-              <script type="text/javascript">
-              new TradingView.widget({{
-              "autosize": true,
-              "symbol": "BINANCE:{tv_symbol}",
-              "interval": "1",
-              "timezone": "Asia/Shanghai",
-              "theme": "dark",
-              "style": "1",
-              "locale": "zh_CN",
-              "enable_publishing": false,
-              "backgroundColor": "#121212",
-              "hide_top_toolbar": false,
-              "save_image": false,
-              "container_id": "tradingview_{tv_symbol}"
-            }});
-            </script>
-            </div>
-            """, height=450
-        )
-        
-        st.subheader("当前持仓与实时盈亏")
-        col_pnl_refresh, col_close_all = st.columns([1, 1])
-        with col_pnl_refresh:
-            if st.button("🔄 刷新最新盈亏 (PnL)"):
-                st.rerun() # 点击时重算盈亏，避免图表一直狂闪
-        
-        # 盈亏计算引擎
-        active_positions = []
-        for pos in st.session_state.positions:
-            sym = pos["交易对"]
-            # 抓取当前最新价用于结算
-            pos_price = st.session_state.latest_prices.get(sym, pos["开仓价"]) 
-            
-            if pos["方向"] == "🟢 做多":
-                pnl = (pos_price - pos["开仓价"]) / pos["开仓价"] * pos["名义价值"]
-            else: 
-                pnl = (pos["开仓价"] - pos_price) / pos["开仓价"] * pos["名义价值"]
-            
-            if pnl <= -pos["占用保证金"]:
-                st.error(f"🚨 爆仓通知：您的 {sym} {pos['方向']} 仓位已遭强平！损失保证金：{pos['占用保证金']:.2f} USDT")
-                continue 
-            
-            pos_display = pos.copy()
-            pos_display["当前价"] = round(pos_price, 4)
-            pos_display["未实现盈亏(USDT)"] = round(pnl, 2)
-            pos_display["收益率(ROE)"] = f"{(pnl / pos['占用保证金'] * 100):.2f}%"
-            active_positions.append(pos_display)
-            
-        st.session_state.positions = [{"方向": p["方向"], "交易对": p["交易对"], "杠杆": p["杠杆"], "名义价值": p["名义价值"], "占用保证金": p["占用保证金"], "开仓价": p["开仓价"]} for p in active_positions]
+    st.markdown("#### ⚡ 极速开仓 (1x - 1000x)")
+    leverage = st.slider("杠杆倍数", 1, 1000, 100, label_visibility="collapsed")
+    amount = st.number_input("开仓名义价值 (U)", min_value=10.0, value=10000.0, step=1000.0)
+    
+    margin_req = amount / leverage
+    st.caption(f"🛡️ 实际冻结保证金: **{margin_req:.2f} U**")
+    
+    col_buy, col_sell = st.columns(2)
+    with col_buy:
+        if st.button("🟢 做多 (Long)", use_container_width=True):
+            price = get_single_price(tv_symbol)
+            if price > 0 and st.session_state.balance >= margin_req:
+                st.session_state.balance -= margin_req
+                st.session_state.positions.append({"方向": "做多 🟢", "交易对": tv_symbol, "杠杆": leverage, "名义价值": amount, "占用保证金": margin_req, "开仓价": price})
+                st.toast(f"✅ 做多 {tv_symbol} 成功！")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("失败：余额不足或网络波动")
+    with col_sell:
+        if st.button("🔴 做空 (Short)", use_container_width=True):
+            price = get_single_price(tv_symbol)
+            if price > 0 and st.session_state.balance >= margin_req:
+                st.session_state.balance -= margin_req
+                st.session_state.positions.append({"方向": "做空 🔴", "交易对": tv_symbol, "杠杆": leverage, "名义价值": amount, "占用保证金": margin_req, "开仓价": price})
+                st.toast(f"✅ 做空 {tv_symbol} 成功！")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("失败：余额不足或网络波动")
 
-        if not active_positions:
-            st.info("暂无持仓数据。")
-        else:
-            df_pos = pd.DataFrame(active_positions)
-            def color_pnl(val):
-                if isinstance(val, (int, float)):
-                    return 'color: #0ecb81' if val > 0 else 'color: #f6465d' if val < 0 else 'color: white'
-                return ''
-            st.dataframe(df_pos.style.map(color_pnl, subset=['未实现盈亏(USDT)']), use_container_width=True)
+# --- 模块 3：资产与持仓 (使用 Fragment 实现每 2 秒无感自动结算盈亏) ---
+@st.fragment(run_every=2)
+def render_positions_and_pnl():
+    if not st.session_state.positions:
+        st.info("📦 当前暂无持仓")
+        return
+
+    # 1. 极速精准拉取当前所有持仓币种的最新价
+    symbols_needed = list(set([p['交易对'] for p in st.session_state.positions]))
+    symbols_query = '["' + '","'.join(symbols_needed) + '"]'
+    prices_dict = {}
+    try:
+        res = requests.get(f"https://data-api.binance.vision/api/v3/ticker/price?symbols={symbols_query}", timeout=2)
+        for item in res.json():
+            prices_dict[item['symbol']] = float(item['price'])
+    except:
+        pass # 断网时暂时使用上一次的价格
+
+    # 2. 计算实时盈亏与爆仓拦截
+    active_positions = []
+    for pos in st.session_state.positions:
+        sym = pos["交易对"]
+        current_price = prices_dict.get(sym, pos.get("当前价", pos["开仓价"]))
+        
+        if pos["方向"] == "做多 🟢":
+            pnl = (current_price - pos["开仓价"]) / pos["开仓价"] * pos["名义价值"]
+        else: 
+            pnl = (pos["开仓价"] - current_price) / pos["开仓价"] * pos["名义价值"]
+        
+        # 爆仓判定 (1000倍杠杆核心机制)
+        if pnl <= -pos["占用保证金"]:
+            st.error(f"🚨 爆仓！{sym} {pos['方向']} 遭强平！损失保证金: {pos['占用保证金']:.2f} U")
+            continue 
+        
+        pos["当前价"] = current_price
+        pos["未实现盈亏"] = pnl
+        active_positions.append(pos)
+        
+    st.session_state.positions = active_positions
+
+    # 3. 渲染炫酷的动态卡片
+    st.caption("🔄 持仓盈亏每 2 秒自动跳动更新")
+    for pos in active_positions:
+        with st.container(border=True):
+            pnl = pos["未实现盈亏"]
+            pnl_color = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
             
-            with col_close_all:
-                if st.button("⚡ 一键市价全平", type="primary"):
-                    total_pnl = sum([p["未实现盈亏(USDT)"] for p in active_positions])
-                    returned_margin = sum([p["占用保证金"] for p in active_positions])
-                    st.session_state.balance += (returned_margin + total_pnl)
-                    st.session_state.positions = [] 
-                    st.success(f"✅ 全平成功！释放资金 {returned_margin + total_pnl:.2f} USDT。")
-                    time.sleep(1)
-                    st.rerun()
+            st.markdown(f"**{pos['交易对'].replace('USDT','/USDT')}** | {pos['方向']} | **{pos['杠杆']}x**")
+            
+            c1, c2 = st.columns(2)
+            c1.metric("未实现盈亏 (U)", f"{pnl_color} {pnl:.2f}")
+            c2.metric("收益率 (ROE)", f"{(pnl / pos['占用保证金'] * 100):.2f}%")
+            
+            c3, c4 = st.columns(2)
+            c3.caption(f"开仓价: {pos['开仓价']:.6f}")
+            c4.caption(f"当前价: {pos['当前价']:.6f}")
+            c3.caption(f"保证金: {pos['占用保证金']:.2f}")
+            c4.caption(f"名义价值: {pos['名义价值']:.2f}")
 
-    with col_trade:
-        st.subheader("💳 极速下单")
-        # ⚠️ 修复点3：下单时不再依赖全局刷新出的价格，改为点击瞬间后台拉取
-        display_price = st.session_state.latest_prices.get(tv_symbol, 0.0)
-        st.metric("参考标记价格", f"${display_price:,.4f}" if display_price > 0 else "加载中...")
-        st.divider()
-        
-        leverage = st.slider("杠杆倍数 (Leverage)", min_value=1, max_value=1000, value=100, step=1)
-        amount = st.number_input("开仓名义价值 (USDT)", min_value=1.0, value=10000.0, step=1000.0)
-        
-        margin_required = amount / leverage
-        st.caption(f"🚀 实际扣除保证金: **{margin_required:.4f} USDT**")
-        
-        col_buy, col_sell = st.columns(2)
-        with col_buy:
-            if st.button("做多 (Long) 🟢", use_container_width=True):
-                # 点击瞬间获取精准成交价
-                exec_price = get_single_price(tv_symbol)
-                if exec_price == 0:
-                    st.error("网络异常，无法获取成交价！")
-                elif st.session_state.balance >= margin_required:
-                    st.session_state.balance -= margin_required
-                    st.session_state.positions.append({
-                        "方向": "🟢 做多", "交易对": tv_symbol, "杠杆": leverage, 
-                        "名义价值": amount, "占用保证金": margin_required, "开仓价": exec_price
-                    })
-                    st.success(f"做多成功！成交均价：{exec_price}")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("余额不足，无法开仓！")
-                    
-        with col_sell:
-            if st.button("做空 (Short) 🔴", use_container_width=True):
-                exec_price = get_single_price(tv_symbol)
-                if exec_price == 0:
-                    st.error("网络异常，无法获取成交价！")
-                elif st.session_state.balance >= margin_required:
-                    st.session_state.balance -= margin_required
-                    st.session_state.positions.append({
-                        "方向": "🔴 做空", "交易对": tv_symbol, "杠杆": leverage, 
-                        "名义价值": amount, "占用保证金": margin_required, "开仓价": exec_price
-                    })
-                    st.success(f"做空成功！成交均价：{exec_price}")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("余额不足，无法开仓！")
-
+with tab_assets:
+    col_reset, col_close = st.columns(2)
+    with col_reset:
+        st.button("🔄 重置 500 万体验金", on_click=reset_balance, use_container_width=True)
+    with col_close:
+        # 一键平仓按钮放在自动刷新区域之外，点击触发全局重载交割
+        if st.button("⚡ 一键全部平仓", type="primary", use_container_width=True):
+            if st.session_state.positions:
+                total_return = sum([p["占用保证金"] + p.get("未实现盈亏", 0) for p in st.session_state.positions])
+                st.session_state.balance += total_return
+                st.session_state.positions = [] 
+                st.toast(f"✅ 成功平仓！连本带利返回 {total_return:.2f} USDT", icon="💸")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.toast("当前无持仓", icon="ℹ️")
+                
+    st.divider()
+    # 挂载局部自动刷新的持仓监控台
+    render_positions_and_pnl()
