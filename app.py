@@ -6,7 +6,6 @@ import json
 import os
 import hashlib
 import uuid
-from openai import OpenAI
 
 # ==========================================
 # 0. 页面全局配置
@@ -143,19 +142,65 @@ def settle_liquidations():
     sync_current_user_data()
 
 # ==========================================
-# 4. 顶部导航
+# 4. 顶部导航与【内置免费免Key AI】
 # ==========================================
 col_title, col_ai, col_exit = st.columns([5, 2, 2])
 with col_title: st.markdown('<div class="title-text">⚡ Crypto 模拟引擎</div>', unsafe_allow_html=True)
 with col_exit:
     if st.button("🚪 退出", use_container_width=True): logout()
-st.caption(f"交易员：**{st.session_state.username}** | 数据源: WebSocket 实盘直连")
+
+with col_ai:
+    with st.popover("🤖 内置 AI", use_container_width=True):
+        st.markdown("##### 免费智能投顾")
+        st.caption("基于公开节点，无需 API Key 即可使用")
+        
+        # 聊天记录容器
+        chat_container = st.container(height=250)
+        with chat_container:
+            for msg in st.session_state.chat_history:
+                if msg["role"] != "system":
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+        
+        user_input = st.chat_input("随时向 AI 提问...")
+        if user_input:
+            st.session_state.chat_history.append({"role": "user", "content": user_input})
+            with chat_container:
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+                
+                with st.chat_message("assistant"):
+                    try:
+                        # 注入灵魂：让 AI 知道用户当前的真实资产情况
+                        my_pos_str = f"当前余额:{st.session_state.balance:,.2f}U. 持有{len(st.session_state.positions)}个仓位。"
+                        system_prompt = f"你是专业的加密货币交易顾问。请简短专业地用中文回答。用户数据：{my_pos_str}"
+                        messages = [{"role": "system", "content": system_prompt}] + st.session_state.chat_history
+                        
+                        # 调用完全免费、免注册的公开 AI 接口
+                        with st.spinner("思考中..."):
+                            res = requests.post("https://text.pollinations.ai/", json={"messages": messages, "model": "openai"}, timeout=15)
+                        
+                        if res.status_code == 200:
+                            ai_reply = res.text
+                            # 模拟打字机效果
+                            def stream_text():
+                                for char in ai_reply:
+                                    yield char
+                                    time.sleep(0.01)
+                            st.write_stream(stream_text)
+                            st.session_state.chat_history.append({"role": "assistant", "content": ai_reply})
+                        else:
+                            st.error("公共免费节点拥挤，请稍后再试。")
+                    except Exception as e:
+                        st.error("网络异常，AI 连接失败。")
+
+st.caption(f"交易员：**{st.session_state.username}** | 数据源: WebSocket 毫秒级直连")
 st.divider()
 
 tab_market, tab_trade, tab_assets = st.tabs(["📊 毫秒级行情", "📈 极速交易", "💼 动态资产持仓"])
 
 # ==========================================
-# 模块 1: 行情榜
+# 模块 1: WSS 行情榜
 # ==========================================
 with tab_market:
     st.components.v1.html(
@@ -212,12 +257,10 @@ with tab_market:
     )
 
 # ==========================================
-# 模块 2: 极速交易面板 (恢复原版稳定的 K 线图配置)
+# 模块 2: 极速交易面板
 # ==========================================
 with tab_trade:
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
-    
-    # 🌟 核心修复：带回了 interval: "1" 和 container_id 绑定，K线图完美复活
     st.components.v1.html(
         f"""
         <div class="tradingview-widget-container" style="height:350px;width:100%">
