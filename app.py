@@ -129,12 +129,11 @@ def get_single_price(symbol):
         except: continue
     return 0.0
 
-# 当发生交易或平仓时，进行一次 Python 端的硬结算（防止伪造数据）
 def settle_liquidations():
     active = []
     for pos in st.session_state.positions:
         price = get_single_price(pos["交易对"])
-        if price == 0: price = pos["开仓价"] # 网络异常时暂不强平
+        if price == 0: price = pos["开仓价"] 
         pnl = (price - pos["开仓价"]) / pos["开仓价"] * pos["名义价值"] if pos["方向"] == "做多 🟢" else (pos["开仓价"] - price) / pos["开仓价"] * pos["名义价值"]
         if pnl <= -pos["占用保证金"]:
             st.toast(f"🚨 {pos['交易对']} 已爆仓！", icon="💥")
@@ -156,7 +155,7 @@ st.divider()
 tab_market, tab_trade, tab_assets = st.tabs(["📊 毫秒级行情", "📈 极速交易", "💼 动态资产持仓"])
 
 # ==========================================
-# 模块 1: HTML+JS WebSocket 注入 (毫秒级行情榜)
+# 模块 1: 行情榜
 # ==========================================
 with tab_market:
     st.components.v1.html(
@@ -177,7 +176,6 @@ with tab_market:
             <tbody id="market-body"></tbody>
         </table>
         <script>
-            // 订阅币安原生 WebSocket 全市场 Ticker
             const ws = new WebSocket('wss://data-stream.binance.vision:9443/ws/!ticker@arr');
             const targetCoins = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','XRPUSDT','PEPEUSDT','WLDUSDT','ORDIUSDT','AVAXUSDT'];
             const tbody = document.getElementById('market-body');
@@ -214,17 +212,19 @@ with tab_market:
     )
 
 # ==========================================
-# 模块 2: 极速交易面板
+# 模块 2: 极速交易面板 (1秒级图表)
 # ==========================================
 with tab_trade:
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
+    
+    # 🌟 核心升级点：将 "interval": "1" 改为了 "interval": "1S"，开启每秒刷新一根 K 线图！
     st.components.v1.html(
         f"""
         <div class="tradingview-widget-container" style="height:350px;width:100%">
           <div id="tv_{tv_symbol}" style="height:calc(100% - 32px);width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
-          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117"}});
+          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1S", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117"}});
         </script></div>
         """, height=350
     )
@@ -238,7 +238,7 @@ with tab_trade:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🟢 做多", use_container_width=True):
-            settle_liquidations() # 交易前先硬核查一遍是否已爆仓
+            settle_liquidations() 
             price = get_single_price(tv_symbol)
             if price > 0 and st.session_state.balance >= margin_req:
                 st.session_state.balance -= margin_req
@@ -258,14 +258,14 @@ with tab_trade:
             else: st.error("网络异常或余额不足")
 
 # ==========================================
-# 模块 3: JS WebSocket 注入 (动态总资产 & 毫秒跳动盈亏)
+# 模块 3: JS WebSocket 注入 (动态总资产)
 # ==========================================
 with tab_assets:
     col_r, col_c = st.columns(2)
     with col_r: st.button("🔄 重置资金", on_click=reset_balance, use_container_width=True)
     with col_c:
         if st.button("⚡ 结算平仓", type="primary", use_container_width=True):
-            settle_liquidations() # 获取精准价格并剔除爆仓单
+            settle_liquidations() 
             if st.session_state.positions:
                 total_return = 0
                 for p in st.session_state.positions:
@@ -278,11 +278,9 @@ with tab_assets:
                 st.toast("✅ 已全部市价平仓！")
                 st.rerun()
 
-    # 提取 Python 数据传给 Javascript
     pos_json = json.dumps(st.session_state.positions)
     base_balance = st.session_state.balance
 
-    # 注入超级动态 UI
     st.components.v1.html(
         f"""
         <style>
@@ -315,7 +313,6 @@ with tab_assets:
             let totalMargin = 0;
             let streams = [];
             
-            // 渲染独立卡片
             positions.forEach((pos, index) => {{
                 totalMargin += pos['占用保证金'];
                 streams.push(pos['交易对'].toLowerCase() + '@ticker');
@@ -342,30 +339,24 @@ with tab_assets:
             document.getElementById('total-margin').innerText = totalMargin.toFixed(2);
             if (positions.length === 0) container.innerHTML = '<div style="color:#848e9c; text-align:center;">暂无持仓</div>';
 
-            // 建立毫秒级 WebSocket 监听当前持有的所有币种
             if(streams.length > 0) {{
                 const wsUrl = 'wss://data-stream.binance.vision:9443/ws/' + streams.join('/');
                 const ws = new WebSocket(wsUrl);
-                
                 let currentPnLs = new Array(positions.length).fill(0);
                 
                 ws.onmessage = (event) => {{
                     const data = JSON.parse(event.data);
                     const currentSymbol = data.s;
                     const currentPrice = parseFloat(data.c);
-                    
                     let globalPnL = 0;
                     
                     positions.forEach((pos, i) => {{
                         if (pos['交易对'] === currentSymbol) {{
-                            // 计算爆表盈亏
                             let pnl = 0;
                             if(pos['方向'] === '做多 🟢') pnl = (currentPrice - pos['开仓价']) / pos['开仓价'] * pos['名义价值'];
                             else pnl = (pos['开仓价'] - currentPrice) / pos['开仓价'] * pos['名义价值'];
                             
                             currentPnLs[i] = pnl;
-                            
-                            // 更新 HTML DOM
                             document.getElementById(`price-${{i}}`).innerText = currentPrice.toFixed(4);
                             
                             const elPnl = document.getElementById(`pnl-${{i}}`);
@@ -377,13 +368,11 @@ with tab_assets:
                             elRoe.innerText = (roe > 0 ? '+' : '') + roe.toFixed(2) + '%';
                             elRoe.className = pnl >= 0 ? 'val-green' : 'val-red';
                             
-                            // 爆仓红色警告 UI
                             if(pnl <= -pos['占用保证金']) elPnl.innerText = '🚨已爆仓';
                         }}
                         globalPnL += currentPnLs[i];
                     }});
                     
-                    // 毫秒级总资产动态跳动！
                     const totalEquity = baseBalance + totalMargin + globalPnL;
                     const elEquity = document.getElementById('total-equity');
                     elEquity.innerText = totalEquity.toLocaleString('en-US', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
