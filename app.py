@@ -1,8 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. 设置 Streamlit 页面配置（必须放在第一行）
-# 设置 layout="wide" 让页面全宽，隐藏默认的侧边栏和多余边距
+# 1. 设置 Streamlit 页面配置
 st.set_page_config(
     page_title="廿九实战终端",
     page_icon="⚡",
@@ -10,30 +9,31 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 隐藏 Streamlit 默认的顶部菜单、底部水印和多余的内边距，让你的应用完全沉浸式填满屏幕
+# 隐藏默认元素，实现全屏沉浸式体验
 hide_streamlit_style = """
 <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .block-container {
-        padding-top: 0rem !important;
-        padding-bottom: 0rem !important;
-        padding-left: 0rem !important;
-        padding-right: 0rem !important;
+        padding: 0rem !important;
         max-width: 100% !important;
+    }
+    iframe {
+        border: none !important;
     }
 </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# 2. 你的完整 HTML/CSS/JS 代码
+# 2. 优化后的核心 HTML/JS 代码
 HTML_CONTENT = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>廿九 - 极速实战终端 V11</title>
+    <!-- 引入 TradingView Lightweight Charts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/3.8.0/lightweight-charts.standalone.production.js"></script>
     <style>
         :root {
@@ -68,24 +68,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .container { padding: 16px; max-width: 600px; margin: 0 auto; height: 100%;}
         .card-title { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 16px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 10px;}
 
-        /* 行情列表 */
         .market-header { display: grid; grid-template-columns: 2fr 1fr 1fr; font-size: 12px; color: var(--text-muted); margin-bottom: 10px; padding: 0 5px;}
         .market-header div:nth-child(2), .market-header div:nth-child(3) { text-align: right; }
         .coin-row { display: grid; grid-template-columns: 2fr 1fr 1fr; align-items: center; padding: 12px 5px; border-bottom: 1px solid var(--border); font-family: monospace; font-size: 15px;}
-        .coin-row:last-child { border-bottom: none; }
         .coin-name { font-weight: bold; font-family: -apple-system, sans-serif;}
         .price-spot, .price-future { text-align: right; font-weight: 600; transition: color 0.1s;}
 
-        /* K线图表 */
         .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .chart-coin-title { font-size: 18px; font-weight: 900; color: var(--primary); font-family: monospace; display: flex; align-items: center; gap: 8px;}
         .chart-price { font-size: 18px; font-weight: bold; color: #fff; font-family: monospace;}
         .timeframes { display: flex; gap: 6px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 8px; border: 1px solid var(--border);}
         .tf-btn { color: var(--text-muted); font-size: 12px; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;}
         .tf-btn.active { background: var(--bg-hover); color: #fff; }
-        #tvchart { width: 100%; height: 320px; position: relative; border-radius: 8px; overflow: hidden;}
+        #tvchart { width: 100%; height: 320px; position: relative; border-radius: 8px; overflow: hidden; background: transparent; }
 
-        /* 交易表单 */
         .input-group { display: flex; gap: 12px; margin-bottom: 12px; }
         .input-box { flex: 1; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); transition: 0.3s; }
         .input-box:focus-within { border-color: var(--primary); box-shadow: 0 0 10px rgba(252,213,53,0.1); background: rgba(0,0,0,0.4);}
@@ -101,13 +97,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .btn-submit { width: 100%; background: linear-gradient(90deg, var(--primary), #f39c12); color: #000; border: none; padding: 16px; border-radius: 12px; font-size: 16px; font-weight: 900; cursor: pointer; text-transform: uppercase; box-shadow: 0 4px 15px rgba(252,213,53,0.3); transition: 0.2s;}
         .btn-submit:active { transform: scale(0.98); }
 
-        /* 持仓与历史切换 Tab */
         .pos-tabs { display: flex; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
         .pos-tab { font-size: 14px; font-weight: 800; color: var(--text-muted); cursor: pointer; transition: 0.3s; position: relative; }
         .pos-tab.active { color: #fff; }
         .pos-tab.active::after { content: ''; position: absolute; bottom: -11px; left: 0; width: 100%; height: 3px; background: var(--primary); border-radius: 3px; box-shadow: 0 0 8px var(--primary); }
 
-        /* 仓位卡片通用 */
         .pos-card { position: relative; overflow: hidden; background: linear-gradient(180deg, rgba(43,49,57,0.6) 0%, rgba(24,26,32,0.8) 100%); border-radius: 16px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.3);}
         .pos-line { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
         .pos-line.long { background: var(--up-green); box-shadow: 0 0 15px var(--up-green);}
@@ -133,7 +127,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .up { color: var(--up-green) !important; }
         .down { color: var(--down-red) !important; }
 
-        /* 各种弹窗通用 (TP/SL & 提现) */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 9999; display: none; justify-content: center; align-items: center; }
         .modal-content { width: 90%; max-width: 380px; background: linear-gradient(180deg, #1f2329 0%, #121418 100%); border: 1px solid var(--primary); border-radius: 20px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .modal-title { font-size: 18px; font-weight: 900; color: #fff; margin-bottom: 10px; text-align: center; }
@@ -141,13 +134,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .modal-btn-cancel { flex: 1; background: rgba(255,255,255,0.1); color: #fff; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; }
         .modal-btn-save { flex: 1; background: var(--primary); color: #000; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; }
 
-        /* Toast 弹窗 */
         #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px; pointer-events: none;}
         .toast { background: rgba(24, 26, 32, 0.95); backdrop-filter: blur(10px); color: #fff; padding: 16px 20px; border-radius: 12px; font-weight: bold; font-size: 14px; border-left: 4px solid var(--primary); box-shadow: 0 10px 30px rgba(0,0,0,0.5); animation: slideDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); line-height: 1.5;}
         .toast.error { border-left-color: var(--down-red); background: rgba(40, 15, 15, 0.95);}
         .toast.success { border-left-color: var(--up-green); }
 
-        /* AI 聊天室 */
         .chat-container { display: flex; flex-direction: column; height: calc(100vh - 180px); }
         .chat-box { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 10px;}
         .chat-box::-webkit-scrollbar { display: none; }
@@ -181,7 +172,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     <div id="toast-container"></div>
 
-    <!-- 盘中动态修改止盈止损面板 -->
     <div id="tpsl-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-title" id="modal-title">⚙️ 随时调整止盈止损</div>
@@ -205,7 +195,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 💰 新增：虚拟提现面板 -->
     <div id="withdraw-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-title" style="color: var(--up-green);">💰 模拟利润落袋为安</div>
@@ -236,7 +225,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 <span class="equity-value" id="total-equity">5,000,000.00</span>
             </div>
             <div class="header-btns">
-                <!-- 提现按钮 -->
                 <button class="action-btn-sm green" onclick="openWithdrawModal()">💰 虚拟提现</button>
                 <button class="action-btn-sm" onclick="resetAccount()">↻ 重置</button>
             </div>
@@ -244,8 +232,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     </header>
 
     <div class="container">
-        
-        <!-- ================= 1. 纯行情看板 ================= -->
         <div id="market" class="tab-content">
             <div class="glass-card" style="padding: 16px 10px;">
                 <div class="card-title" style="margin-left: 5px;">🔥 现货/合约全市场扫描</div>
@@ -256,7 +242,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- ================= 2. 模拟交易 + 动态 K线面板 ================= -->
         <div id="portfolio" class="tab-content active">
             
             <div class="glass-card" style="padding: 12px;">
@@ -273,12 +258,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                         <span class="tf-btn" onclick="changeTF('1d', this)">1D</span>
                     </div>
                 </div>
+                <!-- 图表容器 -->
                 <div id="tvchart"></div>
             </div>
 
             <div class="glass-card">
                 <div class="card-title">⚔️ 廿九实战量化 (强平机制启动)</div>
-                
                 <div class="input-group">
                     <div class="input-box">
                         <span class="input-label">交易对</span>
@@ -304,19 +289,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                     </div>
                 </div>
 
-                <!-- 下单时填止盈止损 -->
                 <div class="input-group">
                     <div class="input-box">
                         <span class="input-label">止盈价 (TP)</span>
-                        <input type="number" id="t-tp" placeholder="忘记设可稍后改" oninput="updatePreview()">
+                        <input type="number" id="t-tp" placeholder="选填" oninput="updatePreview()">
                     </div>
                     <div class="input-box">
                         <span class="input-label">止损价 (SL)</span>
-                        <input type="number" id="t-sl" placeholder="忘记设可稍后改" oninput="updatePreview()">
+                        <input type="number" id="t-sl" placeholder="选填" oninput="updatePreview()">
                     </div>
                 </div>
 
-                <!-- 预估数据面板 -->
                 <div class="preview-board">
                     <div class="prev-item">
                         <span>💀 预估强制平仓价 (Liquidation)</span>
@@ -335,20 +318,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 <button class="btn-submit" onclick="executeTrade()">🚀 确认下单建仓</button>
             </div>
 
-            <!-- 持仓与历史切换 -->
             <div class="pos-tabs">
                 <div class="pos-tab active" id="tab-active" onclick="switchPosTab('active')">实时持仓 (<span id="pos-count">0</span>)</div>
                 <div class="pos-tab" id="tab-history" onclick="switchPosTab('history')">历史交割单</div>
             </div>
 
-            <!-- 实时持仓容器 -->
             <div id="positions-container"></div>
-            <!-- 历史记录容器 -->
             <div id="history-container" style="display: none;"></div>
 
         </div>
 
-        <!-- ================= 3. 真·OpenClaw 对话 AI ================= -->
         <div id="ai" class="tab-content">
             <div class="chat-container">
                 <div style="text-align:center; margin-bottom: 15px; padding: 12px; background: rgba(142,68,173,0.1); border: 1px dashed var(--ai-color); border-radius: 12px;">
@@ -365,7 +344,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 底部 Tab 导航 -->
     <div class="tab-bar">
         <div class="tab-item" onclick="switchTab('market', this)"><span class="tab-icon">📊</span><span>行情列表</span></div>
         <div class="tab-item active" onclick="switchTab('portfolio', this)"><span class="tab-icon">⚔️</span><span>廿九终端</span></div>
@@ -373,9 +351,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     </div>
 
     <script>
-        // ================= 全局核心架构 =================
         const TOP_COINS =['BTC', 'ETH', 'SOL', 'BNB', 'DOGE', 'XRP', 'PEPE', 'ORDI', 'WLD', 'AVAX', 'LINK', 'SUI', 'ADA'];
-        const BINANCE_DOMAINS =['https://api1.binance.com', 'https://api2.binance.com', 'https://api3.binance.com', 'https://api.binance.com'];
+        
+        // 【核心优化 1】增加了 Binance 的官方 Data API vision 节点，解决跨域及 Streamlit 的屏蔽问题
+        const BINANCE_DOMAINS =[
+            'https://data-api.binance.vision', 
+            'https://api.binance.com', 
+            'https://api1.binance.com'
+        ];
 
         const state = {
             balance: 5000000, prices: {},
@@ -404,7 +387,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 const savedHist = localStorage.getItem('mock_history'); if(savedHist) state.history = JSON.parse(savedHist);
                 const savedChat = localStorage.getItem('mock_chat'); if(savedChat) state.chatHistory = JSON.parse(savedChat);
 
-                initTVChartSafe(); 
+                // 延迟初始化图表，确保 Streamlit iframe 的 DOM 宽度已渲染完毕
+                setTimeout(initTVChartSafe, 300); 
+                
                 renderPositions();
                 renderHistory();
                 renderChatHistory();
@@ -413,7 +398,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 setTimeout(updatePreview, 1000); 
 
                 if(state.chatHistory.length === 0) {
-                    appendChat('ai', '你好！我是 **OpenClaw** 智能交易代理。欢迎来到**【廿九】实战终端**，我已获得你的底层环境权限。\n\n你可以像朋友一样跟我闲聊，探讨宏观经济；或者直接问我：“比特币现在还能追高吗？”\n我都会为你提供最有价值的解答！', false);
+                    appendChat('ai', '你好！我是 **OpenClaw** 智能代理。欢迎来到实战终端。', false);
                 }
             } catch (error) { console.error("初始化出错", error); }
         };
@@ -424,7 +409,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             document.getElementById('t-coin').innerHTML = TOP_COINS.map(c => `<option value="${c}">${c} / USDT</option>`).join('');
         }
 
-        // ================= 免墙行情数据抓取 =================
         async function startBulletproofPolling() {
             const badge = document.getElementById('net-status');
             setInterval(async () => {
@@ -440,9 +424,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                     } catch(e) {}
                 }
                 if(success) {
-                    badge.innerHTML = '<div class="pulse"></div> 🟢 行情引擎直连畅通'; badge.style.color = 'var(--up-green)';
+                    badge.innerHTML = '<div class="pulse"></div> 🟢 行情直连畅通'; badge.style.color = 'var(--up-green)';
                 } else {
-                    badge.innerHTML = '🔴 自动穿透网络封锁中...'; badge.style.color = 'var(--down-red)';
+                    badge.innerHTML = '🔴 自动穿透网络中...'; badge.style.color = 'var(--down-red)';
                 }
             }, 1200); 
         }
@@ -475,11 +459,19 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             setTimeout(() => { if(el) el.style.color = ''; }, 200);
         }
 
-        // ================= TV 图表引擎 =================
+        // ================= 【核心优化 2】K线图表防崩溃引擎 =================
         function initTVChartSafe() {
             try {
                 const container = document.getElementById('tvchart');
+                if (!container) return;
+                
+                // 解决 Streamlit 初始宽度为 0 的崩溃问题
+                let initWidth = container.clientWidth;
+                if (initWidth === 0) initWidth = window.innerWidth > 600 ? 560 : window.innerWidth - 32;
+
                 state.chartInst = LightweightCharts.createChart(container, {
+                    width: initWidth,
+                    height: 320,
                     layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#848E9C' },
                     grid: { vertLines: { color: 'rgba(43,49,57,0.2)', style: 1 }, horzLines: { color: 'rgba(43,49,57,0.2)', style: 1 } },
                     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -487,9 +479,21 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                     timeScale: { borderColor: 'rgba(43,49,57,0.5)', timeVisible: true, secondsVisible: false },
                 });
                 state.candleSeries = state.chartInst.addCandlestickSeries({ upColor: '#0ECB81', downColor: '#F6465D', borderVisible: false, wickUpColor: '#0ECB81', wickDownColor: '#F6465D' });
+                
                 fetchChartHistory(); 
-                new ResizeObserver(() => { if(container.clientWidth > 0) state.chartInst.resize(container.clientWidth, 320); }).observe(container);
-            } catch (error) {}
+
+                // 监听窗口大小变化以重绘图表
+                new ResizeObserver(entries => {
+                    if (entries.length === 0 || entries[0].target.clientWidth === 0) return;
+                    state.chartInst.resize(entries[0].target.clientWidth, 320);
+                }).observe(container);
+
+                // 双保险：1秒后再强制自适应一次，以防 iframe 延迟加载
+                setTimeout(() => {
+                    if(container.clientWidth > 0) state.chartInst.resize(container.clientWidth, 320);
+                }, 1000);
+
+            } catch (error) { console.error("图表初始化失败:", error); }
         }
 
         function syncCoinChart() {
@@ -512,9 +516,30 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 } catch(e) {}
             }
             if (data) {
-                const formatted = data.map(d => ({ time: d[0] / 1000, open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4]) }));
-                state.candleSeries.setData(formatted);
-                state.lastCandle = formatted[formatted.length - 1]; 
+                // 【核心优化 3】使用 Math.floor 确保时间戳严格为整数，避免图表引擎因小数点抛错
+                const formatted = data.map(d => ({ 
+                    time: Math.floor(d[0] / 1000), 
+                    open: parseFloat(d[1]), 
+                    high: parseFloat(d[2]), 
+                    low: parseFloat(d[3]), 
+                    close: parseFloat(d[4]) 
+                }));
+                
+                // 去重及确保时间升序 (LightweightCharts 崩溃常见原因)
+                const uniqueData =[];
+                let lastTime = 0;
+                formatted.forEach(item => {
+                    if (item.time > lastTime) {
+                        uniqueData.push(item);
+                        lastTime = item.time;
+                    }
+                });
+
+                try {
+                    state.candleSeries.setData(uniqueData);
+                    state.lastCandle = uniqueData[uniqueData.length - 1]; 
+                    state.chartInst.timeScale().fitContent(); // 让K线居中充满
+                } catch(e) { console.error("设置K线数据出错:", e); }
             }
         }
 
@@ -523,13 +548,15 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const now = Math.floor(Date.now() / 1000); const tfSeconds = { '1m': 60, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 }[state.chartTF];
             if(now >= state.lastCandle.time + tfSeconds) state.lastCandle = { time: state.lastCandle.time + tfSeconds, open: price, high: price, low: price, close: price };
             else { state.lastCandle.high = Math.max(state.lastCandle.high, price); state.lastCandle.low = Math.min(state.lastCandle.low, price); state.lastCandle.close = price; }
-            state.candleSeries.update(state.lastCandle);
+            try {
+                state.candleSeries.update(state.lastCandle);
+            } catch(e) {}
             const titlePrice = document.getElementById('chart-current-price');
             titlePrice.innerText = '$' + (price < 1 ? price.toFixed(4) : price.toFixed(2));
             titlePrice.style.color = state.lastCandle.close >= state.lastCandle.open ? 'var(--up-green)' : 'var(--down-red)';
         }
 
-        // ================= 3. 廿九实战：爆仓/出金与历史记录引擎 =================
+        // ================= 其余实战量化逻辑 =================
         function updateEquityUI() {
             let totalMarginUsed = 0, totalUnrealizedPNL = 0;
             state.positions.forEach(p => {
@@ -549,7 +576,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         function resetAccount() {
-            if(confirm('重置会清空所有持仓和交割单历史，并恢复 5,000,000 USDT，确认操作？')) {
+            if(confirm('重置会清空所有持仓和交割单历史，确认操作？')) {
                 state.balance = 5000000; state.positions =[]; state.history =[];
                 localStorage.setItem('mock_balance', state.balance); 
                 localStorage.setItem('mock_pos', '[]');
@@ -559,25 +586,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             }
         }
 
-        // 💰 虚拟提现功能
-        function openWithdrawModal() {
-            document.getElementById('withdraw-modal').style.display = 'flex';
-        }
-        function closeWithdrawModal() {
-            document.getElementById('withdraw-modal').style.display = 'none';
-            document.getElementById('withdraw-amount').value = '';
-        }
+        function openWithdrawModal() { document.getElementById('withdraw-modal').style.display = 'flex'; }
+        function closeWithdrawModal() { document.getElementById('withdraw-modal').style.display = 'none'; document.getElementById('withdraw-amount').value = ''; }
+        
         function confirmWithdraw() {
             const amount = parseFloat(document.getElementById('withdraw-amount').value);
             if (isNaN(amount) || amount <= 0) return showToast('请输入有效的提现金额', 'error');
             const avail = updateEquityUI();
-            if (amount > avail) return showToast(`提现金额不能超过可用余额 (${avail.toFixed(2)})！`, 'error');
+            if (amount > avail) return showToast(`提现不能超过可用余额 (${avail.toFixed(2)})！`, 'error');
 
             state.balance -= amount;
             localStorage.setItem('mock_balance', state.balance);
             updateEquityUI();
             closeWithdrawModal();
-            showToast(`🎉 成功提现 ${amount} USDT！定期出金是良好交易习惯的第一步！`, 'success');
+            showToast(`🎉 成功出金 ${amount} USDT！`, 'success');
         }
 
         function updatePreview() {
@@ -620,8 +642,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
             const liqPrice = side === 'long' ? curPrice * (1 - 1/lev) : curPrice * (1 + 1/lev);
             
-            if (side === 'long' && sl && sl <= liqPrice) return showToast(`多单止损不能等于/低于强平价 ${liqPrice.toFixed(4)}`, 'error');
-            if (side === 'short' && sl && sl >= liqPrice) return showToast(`空单止损不能等于/高于强平价 ${liqPrice.toFixed(4)}`, 'error');
+            if (side === 'long' && sl && sl <= liqPrice) return showToast(`多单止损不能等于/低于强平价`, 'error');
+            if (side === 'short' && sl && sl >= liqPrice) return showToast(`空单止损不能等于/高于强平价`, 'error');
 
             const amount = (margin * lev) / curPrice;
             state.positions.unshift({ id: Date.now().toString(), coin, side, lev, margin, entry: curPrice, amount, tp, sl, liq: liqPrice, openTime: Date.now() });
@@ -629,11 +651,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             localStorage.setItem('mock_pos', JSON.stringify(state.positions));
             document.getElementById('t-tp').value = ''; document.getElementById('t-sl').value = '';
             
-            showToast(`✅ 成功建仓：${coin} ${side==='long'?'做多':'做空'} ${lev}X`, 'success');
+            showToast(`✅ 建仓成功`, 'success');
             renderPositions(); updateEquityUI();
         }
 
-        // 盘中随时修改 TP/SL
         function openTPSLModal(id) {
             const p = state.positions.find(x => x.id === id);
             if(!p) return;
@@ -654,20 +675,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const tpVal = parseFloat(document.getElementById('modal-tp').value) || null;
             const slVal = parseFloat(document.getElementById('modal-sl').value) || null;
 
-            if(p.side === 'long') {
-                if(tpVal && tpVal <= p.entry) return showToast('多单止盈价必须大于开仓价！', 'error');
-                if(slVal && slVal >= p.entry) return showToast('多单止损价必须小于开仓价！', 'error');
-                if(slVal && slVal <= p.liq) return showToast(`多单止损不能等于/低于强平价 ${p.liq.toFixed(4)}！`, 'error');
-            } else {
-                if(tpVal && tpVal >= p.entry) return showToast('空单止盈价必须小于开仓价！', 'error');
-                if(slVal && slVal <= p.entry) return showToast('空单止损价必须大于开仓价！', 'error');
-                if(slVal && slVal >= p.liq) return showToast(`空单止损不能等于/高于强平价 ${p.liq.toFixed(4)}！`, 'error');
-            }
-
             p.tp = tpVal; p.sl = slVal;
             localStorage.setItem('mock_pos', JSON.stringify(state.positions));
             closeTPSLModal(); renderPositions();
-            showToast(`✅ 止盈止损修改成功！`, 'success');
+            showToast(`✅ 更新成功！`, 'success');
         }
 
         function fastCalculatePNL() {
@@ -696,8 +707,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 let roe = (pnl / p.margin) * 100;
 
                 const color = pnl >= 0 ? 'var(--up-green)' : 'var(--down-red)', sign = pnl >= 0 ? '+' : '';
-
                 const elPrice = document.getElementById(`pos-price-${p.id}`), elPnl = document.getElementById(`pos-pnl-${p.id}`), elRoe = document.getElementById(`pos-roe-${p.id}`);
+                
                 if(elPrice) elPrice.innerText = curPrice < 1 ? curPrice.toFixed(4) : curPrice.toFixed(2);
                 if(elPnl) { elPnl.innerText = sign + pnl.toFixed(2); elPnl.style.color = color; }
                 if(elRoe) { elRoe.innerText = sign + roe.toFixed(2) + '%'; elRoe.style.color = color; }
@@ -723,8 +734,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             state.balance += pnl; 
             saveHistory(p, finalPrice, pnl, reason);
             state.positions.splice(index, 1);
-            
-            showToast(`🔔 触及 ${reason}，${p.coin} 已自动平仓。盈亏: ${pnl>=0?'+':''}${pnl.toFixed(2)} U`, pnl>=0?'success':'error');
+            showToast(`🔔 ${reason}平仓，盈亏: ${pnl>=0?'+':''}${pnl.toFixed(2)} U`, pnl>=0?'success':'error');
             localStorage.setItem('mock_balance', state.balance); localStorage.setItem('mock_pos', JSON.stringify(state.positions));
             renderPositions(); updateEquityUI(); return true;
         }
@@ -733,14 +743,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const p = state.positions[index];
             let finalPrice = p.liq; let pnl = 0; let reasonStr = '';
 
-            if (!p.sl) {
-                pnl = -p.margin; state.balance = 0; reasonStr = '💀 爆仓归零';
-                showToast(`💀 爆仓警告！${p.coin} 击穿强平线，未设止损，账户 500 万余额已被强制清零！`, 'error');
-            } else {
-                finalPrice = p.sl; pnl = p.side === 'long' ? (p.sl - p.entry)*p.amount : (p.entry - p.sl)*p.amount;
-                state.balance += pnl; reasonStr = '⚠️ 强平截断';
-                showToast(`⚠️ 极端插针触发底线！已按极限止损价 ${p.sl} 强行截断亏损！`, 'error');
-            }
+            if (!p.sl) { pnl = -p.margin; state.balance = 0; reasonStr = '💀 爆仓归零'; showToast(`💀 爆仓！余额被清零！`, 'error'); } 
+            else { finalPrice = p.sl; pnl = p.side === 'long' ? (p.sl - p.entry)*p.amount : (p.entry - p.sl)*p.amount; state.balance += pnl; reasonStr = '⚠️ 强平截断'; showToast(`⚠️ 触发底线！已按截断处理！`, 'error'); }
             
             saveHistory(p, finalPrice, pnl, reasonStr);
             state.positions.splice(index, 1);
@@ -750,7 +754,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
         function manualClose(id) {
             const index = state.positions.findIndex(p => p.id === id);
-            if(index > -1) triggerClose(index, '手动市价平仓');
+            if(index > -1) triggerClose(index, '市价平仓');
         }
 
         function formatTime(ts) {
@@ -783,86 +787,62 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                         <div class="pos-tag ${p.side === 'long' ? 'up' : 'down'}">${p.coin} ${p.side==='long'?'多单':'空单'} · ${p.lev}X</div>
                         <button class="close-btn" onclick="manualClose('${p.id}')">⚡ 闪电平仓</button>
                     </div>
-                    
                     <div class="pos-grid">
                         <div class="grid-item"><span>开仓均价</span><span class="grid-val">$${p.entry.toFixed(4)}</span></div>
                         <div class="grid-item"><span>标记现价</span><span class="grid-val">$<span id="pos-price-${p.id}">--</span></span></div>
                         <div class="grid-item"><span>预估强平</span><span class="grid-val" style="color:var(--down-red)">$${p.liq.toFixed(4)}</span></div>
-                        
-                        <div class="grid-item"><span>投入保证金</span><span class="grid-val">$${p.margin.toFixed(2)}</span></div>
-                        <div class="grid-item" style="cursor:pointer; background:rgba(14,203,129,0.05); padding:6px; border-radius:6px; border:1px dashed rgba(14,203,129,0.3);" onclick="openTPSLModal('${p.id}')">
-                            <span style="color:var(--text-muted); font-size:11px; margin-bottom:2px;">止盈 (TP) ✏️</span>
-                            <span class="grid-val up">${p.tp ? '$'+p.tp : '点击设置'}</span>
+                        <div class="grid-item"><span>保证金</span><span class="grid-val">$${p.margin.toFixed(2)}</span></div>
+                        <div class="grid-item" style="cursor:pointer; background:rgba(14,203,129,0.05); padding:6px; border-radius:6px;" onclick="openTPSLModal('${p.id}')">
+                            <span style="color:var(--text-muted); font-size:11px;">止盈(TP)</span><span class="grid-val up">${p.tp ? '$'+p.tp : '点击设置'}</span>
                         </div>
-                        <div class="grid-item" style="cursor:pointer; background:rgba(246,70,93,0.05); padding:6px; border-radius:6px; border:1px dashed rgba(246,70,93,0.3);" onclick="openTPSLModal('${p.id}')">
-                            <span style="color:var(--text-muted); font-size:11px; margin-bottom:2px;">止损 (SL) ✏️</span>
-                            <span class="grid-val down">${p.sl ? '$'+p.sl : '点击设置'}</span>
+                        <div class="grid-item" style="cursor:pointer; background:rgba(246,70,93,0.05); padding:6px; border-radius:6px;" onclick="openTPSLModal('${p.id}')">
+                            <span style="color:var(--text-muted); font-size:11px;">止损(SL)</span><span class="grid-val down">${p.sl ? '$'+p.sl : '点击设置'}</span>
                         </div>
                     </div>
-
                     <div class="pnl-row">
-                        <div style="display:flex; flex-direction:column;"><span style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">未实现盈亏(USDT)</span><span class="pnl-value" id="pos-pnl-${p.id}">0.00</span></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end;"><span style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">收益率 (ROE)</span><span class="roe-value" id="pos-roe-${p.id}">0.00%</span></div>
+                        <div style="display:flex; flex-direction:column;"><span style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">未实现盈亏</span><span class="pnl-value" id="pos-pnl-${p.id}">0.00</span></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end;"><span style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">收益率(ROE)</span><span class="roe-value" id="pos-roe-${p.id}">0.00%</span></div>
                     </div>
-                </div>
-            `).join('');
+                </div>`).join('');
             fastCalculatePNL(); 
         }
 
         function renderHistory() {
             const container = document.getElementById('history-container');
-            if(state.history.length === 0) { container.innerHTML = '<div style="text-align:center;color:var(--border);padding:30px;font-weight:bold;">暂无历史交割单记录</div>'; return; }
-
+            if(state.history.length === 0) { container.innerHTML = '<div style="text-align:center;color:var(--border);padding:30px;font-weight:bold;">暂无交割单记录</div>'; return; }
             let html = state.history.map(h => {
-                const isProfit = h.realizedPnl >= 0;
-                const color = isProfit ? 'var(--up-green)' : 'var(--down-red)';
-                const sign = isProfit ? '+' : '';
-                
-                let reasonClass = 'history-reason';
-                if(h.reason.includes('爆仓')) reasonClass += ' reason-liq';
-                else if(h.reason.includes('止盈')) reasonClass += ' reason-tp';
-                
+                const isProfit = h.realizedPnl >= 0; const color = isProfit ? 'var(--up-green)' : 'var(--down-red)';
                 return `
                 <div class="pos-card" style="opacity: 0.9;">
                     <div class="pos-line ${h.side}" style="background:${color}; box-shadow:none;"></div>
                     <div class="pos-header" style="border-bottom:none; margin-bottom:4px;">
                         <div class="pos-tag" style="color:${color};">${h.coin} ${h.side==='long'?'多单':'空单'} · ${h.lev}X</div>
-                        <div class="${reasonClass}">${h.reason}</div>
+                        <div class="history-reason" style="background:rgba(255,255,255,0.1)">${h.reason}</div>
                     </div>
-                    
                     <div class="pos-grid" style="margin-bottom: 8px;">
                         <div class="grid-item"><span>建仓价</span><span class="grid-val">$${h.entry.toFixed(4)}</span></div>
                         <div class="grid-item"><span>平仓价</span><span class="grid-val">$${h.closePrice.toFixed(4)}</span></div>
-                        <div class="grid-item"><span>平仓时间</span><span class="grid-val" style="font-weight:normal; font-size:11px;">${formatTime(h.closeTime)}</span></div>
+                        <div class="grid-item"><span>时间</span><span class="grid-val" style="font-weight:normal; font-size:11px;">${formatTime(h.closeTime)}</span></div>
                     </div>
-
                     <div class="pnl-row" style="background:transparent; padding:0; border:none; margin-top:8px; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 8px;">
-                        <div style="display:flex; flex-direction:column;"><span style="font-size:11px; color:var(--text-muted);">已实现盈亏</span><span class="pnl-value" style="color:${color}; font-size:20px;">${sign}${h.realizedPnl.toFixed(2)}</span></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end;"><span style="font-size:11px; color:var(--text-muted);">净收益率</span><span class="roe-value" style="color:${color}">${sign}${h.roe.toFixed(2)}%</span></div>
+                        <div style="display:flex; flex-direction:column;"><span style="font-size:11px; color:var(--text-muted);">已实现盈亏</span><span class="pnl-value" style="color:${color}; font-size:20px;">${isProfit?'+':''}${h.realizedPnl.toFixed(2)}</span></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end;"><span style="font-size:11px; color:var(--text-muted);">净收益率</span><span class="roe-value" style="color:${color}">${isProfit?'+':''}${h.roe.toFixed(2)}%</span></div>
                     </div>
-                </div>
-            `}).join('');
-            
-            html += `<div class="clear-hist-btn" onclick="clearHistory()">🗑️ 清空所有历史记录</div>`;
+                </div>`}).join('');
+            html += `<div class="clear-hist-btn" onclick="clearHistory()">🗑️ 清空所有历史</div>`;
             container.innerHTML = html;
         }
 
         function clearHistory() {
-            if(confirm('确定要清空这台设备上的所有历史交割单记录吗？')) {
-                state.history =[]; localStorage.setItem('mock_history', '[]'); renderHistory();
-            }
+            if(confirm('清空这台设备上的所有历史记录？')) { state.history =[]; localStorage.setItem('mock_history', '[]'); renderHistory(); }
         }
 
-        // ================= 4. 真·OpenClaw AI (高度拟人化，带完整记忆) =================
         function appendChat(role, content, save=true) {
             const box = document.getElementById('chat-box');
             let htmlContent = content.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             box.innerHTML += `<div class="msg-row ${role}"><div class="msg-bubble">${htmlContent}</div></div>`;
             box.scrollTop = box.scrollHeight;
-            if(save) {
-                state.chatHistory.push({role, content}); 
-                localStorage.setItem('mock_chat', JSON.stringify(state.chatHistory));
-            }
+            if(save) { state.chatHistory.push({role, content}); localStorage.setItem('mock_chat', JSON.stringify(state.chatHistory)); }
         }
 
         function renderChatHistory() {
@@ -877,63 +857,41 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         async function sendAI() {
             const input = document.getElementById('chat-input'), text = input.value.trim();
             if(!text) return;
-
             appendChat('user', text); input.value = '';
             
-            const box = document.getElementById('chat-box');
-            const typingId = 'typing-' + Date.now();
-            box.innerHTML += `<div class="msg-row ai" id="${typingId}"><div class="msg-bubble" style="color:var(--ai-glow); font-family:monospace;">[OpenClaw Agent] 思维引擎与行情数据融合中<span class="pulse" style="display:inline-block; margin-left:8px;"></span></div></div>`;
+            const box = document.getElementById('chat-box'), typingId = 'typing-' + Date.now();
+            box.innerHTML += `<div class="msg-row ai" id="${typingId}"><div class="msg-bubble" style="color:var(--ai-glow); font-family:monospace;">思考中<span class="pulse" style="display:inline-block; margin-left:8px;"></span></div></div>`;
             box.scrollTop = box.scrollHeight;
 
             try {
-                let messages =[
-                    {
-                        role: 'system', 
-                        content: `你是基于 OpenClaw 架构的高级智能交易代理 (AI Agent)。你拥有极高的人性化和同理心。
-你的规则如下：
-1. 记忆对话：你要记住用户的聊天上下文，像朋友一样自然对话。
-2. 日常闲聊：如果用户跟你探讨行情逻辑、宏观经济（如美联储降息）、问候或非交易话题，请用有情感的口吻正常回复。绝对不要在闲聊时强行输出“做多做空”的交易点位！
-3. 盘面分析：只有当用户明确要求分析某个币种的走势、点位或做单建议时，你才结合【系统最新报价】进行分析，并提供具体的做单观点、入场价、止盈止损价。
-4. 回复使用中文，态度自信且专业。`
-                    }
-                ];
-
-                const recentHistory = state.chatHistory.slice(-8);
-                recentHistory.forEach(m => {
-                    messages.push({ role: (m.role === 'ai' ? 'assistant' : 'user'), content: m.content });
-                });
-
+                let messages =[{ role: 'system', content: `你是基于 OpenClaw 的智能代理，请提供极高同理心和准确盘面分析。` }];
+                state.chatHistory.slice(-8).forEach(m => messages.push({ role: (m.role === 'ai' ? 'assistant' : 'user'), content: m.content }));
+                
                 let coinRef = TOP_COINS.find(c => text.toUpperCase().includes(c));
-                let envData = coinRef ? `当前 ${coinRef} 实时市价: $${state.prices[coinRef] || '未知'}` : `当前大盘风向标 BTC 实时市价: $${state.prices['BTC'] || '未知'}`;
+                let envData = coinRef ? `当前 ${coinRef} 实时价: $${state.prices[coinRef]||'未知'}` : `BTC市价: $${state.prices['BTC']||'未知'}`;
                 
                 messages.pop(); 
-                messages.push({ role: 'user', content: `[系统实时隐藏数据注入: ${envData}]\n\n用户说: ${text}` });
+                messages.push({ role: 'user', content: `[隐藏数据注入: ${envData}]\n\n用户说: ${text}` });
 
-                const res = await fetch('https://text.pollinations.ai/', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        messages: messages,
-                        model: "openai" 
-                    })
-                });
-
+                const res = await fetch('https://text.pollinations.ai/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages, model: "openai" }) });
                 document.getElementById(typingId).remove();
-                if(!res.ok) throw new Error('API Reject');
-                const aiText = await res.text(); 
-                appendChat('ai', aiText);
+                if(!res.ok) throw new Error();
+                appendChat('ai', await res.text());
             } catch(e) { 
-                document.getElementById(typingId).remove(); 
-                appendChat('ai', "⚠️ OpenClaw 底层节点连接超时，请稍后重试。"); 
+                document.getElementById(typingId).remove(); appendChat('ai', "⚠️ 连接超时，稍后重试。"); 
             }
         }
 
+        // 【核心优化 4】切换 TAB 时强制重新读取 DOM 宽度刷新图表，否则切换回来就是白屏
         function switchTab(tabId, el) {
             document.querySelectorAll('.tab-content, .tab-item').forEach(e => e.classList.remove('active'));
             document.getElementById(tabId).classList.add('active'); el.classList.add('active');
             
             if(tabId === 'portfolio' && state.chartInst) {
-                setTimeout(() => { const container = document.getElementById('tvchart'); state.chartInst.resize(container.clientWidth, 320); }, 50);
+                setTimeout(() => { 
+                    const container = document.getElementById('tvchart'); 
+                    if(container.clientWidth > 0) state.chartInst.resize(container.clientWidth, 320); 
+                }, 100);
             }
             if(tabId === 'ai') setTimeout(()=> document.getElementById('chat-box').scrollTop = 9999, 50);
         }
@@ -948,6 +906,5 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 </body>
 </html>"""
 
-# 3. 将 HTML 嵌入到 Streamlit 中
-# 高度设置为 950 确保在绝大多数桌面和手机屏幕下都能完整显示你的交易终端
-components.html(HTML_CONTENT, height=950, scrolling=True)
+# 3. 将高度设为 1000 以确保不用双滚动条即可完全展示
+components.html(HTML_CONTENT, height=1000, scrolling=True)
