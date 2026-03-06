@@ -10,21 +10,16 @@ import uuid
 # ==========================================
 # 0. Apple 简约科技风格 CSS
 # ==========================================
-st.set_page_config(page_title="Crypto Terminal", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Crypto Terminal PRO", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-    /* 全局背景与字体 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #000000;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    
-    /* 顶部间距下沉 */
     .block-container { padding-top: 4rem; padding-bottom: 5rem; }
-    
-    /* 苹果风格卡片 */
     .apple-card {
         background: #1C1C1E;
         border-radius: 18px;
@@ -32,8 +27,6 @@ st.markdown("""
         margin-bottom: 15px;
         box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     }
-    
-    /* 渐变余额栏 */
     .balance-header {
         background: rgba(28, 28, 30, 0.8);
         backdrop-filter: blur(20px);
@@ -47,30 +40,17 @@ st.markdown("""
         text-align: center;
         margin-bottom: 25px;
     }
-    
-    /* 文字颜色 */
     .text-secondary { color: #8E8E93; font-size: 0.8rem; }
     .price-up { color: #34C759; font-weight: 600; }
     .price-down { color: #FF453A; font-weight: 600; }
-    
-    /* 按钮美化 */
-    .stButton>button {
-        border-radius: 12px;
-        border: none;
-        font-weight: 600;
-        transition: all 0.2s ease;
-    }
-    .stButton>button:hover { transform: scale(1.02); }
-    
-    /* 隐藏默认元素 */
+    .stButton>button { border-radius: 12px; font-weight: 600; }
     header {visibility: hidden;}
-    #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 后端引擎 (数据库/同步)
+# 1. 后端引擎
 # ==========================================
 DATA_FILE = "trading_data_v3.json"
 def load_db():
@@ -91,7 +71,7 @@ def sync_data():
         save_db(db)
 
 # ==========================================
-# 2. 账号系统
+# 2. 账号系统 (修复 KeyError)
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 db = load_db()
@@ -103,191 +83,154 @@ if tok and not st.session_state.logged_in:
             break
 
 if not st.session_state.logged_in:
-    st.markdown("<h2 style='text-align:center; color:white;'>Terminal Login</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:white;'>Terminal</h2>", unsafe_allow_html=True)
     t_login, t_reg = st.tabs(["Sign In", "Register"])
     with t_login:
         with st.form("l"):
             u = st.text_input("Username")
             p = st.text_input("Password", type="password")
-            if st.form_submit_button("Access Terminal", use_container_width=True):
+            if st.form_submit_button("Access", use_container_width=True):
                 hp = hashlib.sha256(p.encode()).hexdigest()
+                # 🛠 修复点：确保使用 db["users"][u]
                 if u in db["users"] and db["users"][u]["password"] == hp:
                     tk = str(uuid.uuid4())
                     db["users"][u]["session_token"] = tk
                     save_db(db); st.query_params["token"] = tk
-                    st.session_state.update({"logged_in":True,"username":u,"balance":db[u]["balance"],"positions":db[u]["positions"],"chat_history":[]})
+                    st.session_state.update({
+                        "logged_in":True,
+                        "username":u,
+                        "balance":db["users"][u]["balance"],
+                        "positions":db["users"][u]["positions"],
+                        "chat_history":[]
+                    })
                     st.rerun()
-                else: st.error("Invalid Credentials")
+                else: st.error("Error")
     with t_reg:
         with st.form("r"):
-            nu = st.text_input("New Username")
-            np = st.text_input("New Password", type="password")
-            if st.form_submit_button("Create Account", use_container_width=True):
+            nu = st.text_input("New User")
+            np = st.text_input("New Pass", type="password")
+            if st.form_submit_button("Create", use_container_width=True):
                 if nu and np and nu not in db["users"]:
                     db["users"][nu] = {"password":hashlib.sha256(np.encode()).hexdigest(),"balance":5000000.0,"positions":[],"session_token":""}
-                    save_db(db); st.success("Account Ready")
+                    save_db(db); st.success("Done")
     st.stop()
 
 # ==========================================
-# 3. 数据引擎 (全市场支持)
+# 3. 数据引擎 (全市场)
 # ==========================================
 @st.cache_data(ttl=600)
 def get_all_symbols():
     try:
-        # 使用币安 API 获取全量 USDT 交易对
         r = requests.get("https://data-api.binance.vision/api/v3/exchangeInfo", timeout=5)
         return [s['symbol'] for s in r.json()['symbols'] if s['symbol'].endswith('USDT') and s['status']=='TRADING']
-    except: return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT"]
+    except: return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 def get_price(sym):
-    nodes = ['https://data-api.binance.vision', 'https://api.mexc.com']
-    for n in nodes:
-        try:
-            r = requests.get(f"{n}/api/v3/ticker/price?symbol={sym}", timeout=3)
-            return float(r.json()['price'])
-        except: continue
-    return 0.0
+    try:
+        r = requests.get(f"https://data-api.binance.vision/api/v3/ticker/price?symbol={sym}", timeout=3)
+        return float(r.json()['price'])
+    except: return 0.0
 
 all_coins = get_all_symbols()
 
 # ==========================================
-# 4. 界面渲染
+# 4. UI 渲染
 # ==========================================
-# AI 抽屉式对话框 (集成回到顶部)
-with st.container():
-    col_l, col_r = st.columns([6, 1])
-    with col_l:
-        st.markdown(f"**Hello, {st.session_state.username}** ⚡ Pro Terminal")
-    with col_r:
-        if st.button("🚪"): 
-            st.query_params.clear(); st.session_state.clear(); st.rerun()
+st.markdown(f"**{st.session_state.username}** · Terminal Pro")
 
-# 苹果风格余额展示栏
-# 计算当前浮动盈亏用于显示实时净资产
-cur_prices = {} # 暂存价格
-total_pnl = 0
-total_margin = 0
-for p in st.session_state.positions:
-    total_margin += p['占用保证金']
-    # 模拟持仓页外的快速估算，持仓页会有WSS
-    
+# 苹果风格余额栏
+total_margin = sum(p['占用保证金'] for p in st.session_state.positions)
 st.markdown(f"""
 <div class="balance-header">
     <div class="text-secondary">Equity Value (USDT)</div>
     <div style="font-size: 2.2rem; font-weight: 600; color: #FFFFFF; letter-spacing: -1px;">
         {st.session_state.balance + total_margin:,.2f}
     </div>
-    <div style="display: flex; justify-content: center; gap: 20px; margin-top: 10px;">
-        <div class="text-secondary">Available: <span style="color:white">{st.session_state.balance:,.0f}</span></div>
-        <div class="text-secondary">AI Consultant: <span style="color:#007AFF">Online</span></div>
-    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# 重新找回 AI 顾问
-with st.expander("🤖 Ask AI Assistant (Market Analysis)"):
-    u_q = st.chat_input("Ask about market trends or your portfolio...")
+# 找回 AI 顾问
+with st.expander("🤖 AI Market Assistant"):
+    u_q = st.chat_input("Ask AI...")
     if u_q:
         st.session_state.chat_history.append({"role": "user", "content": u_q})
         try:
-            prompt = f"System: User balance is {st.session_state.balance}U. Respond briefly in Chinese."
-            res = requests.post("https://text.pollinations.ai/", json={"messages": [{"role":"system","content":prompt}] + st.session_state.chat_history}, timeout=10)
-            if res.status_code == 200:
-                reply = res.text
-                st.session_state.chat_history.append({"role": "assistant", "content": reply})
-            else: st.error("AI Node Busy")
-        except: st.error("AI Connection Failed")
-    
-    for m in st.session_state.chat_history[-4:]: # 只显示最近4条
+            res = requests.post("https://text.pollinations.ai/", json={"messages": [{"role":"system","content":"Crypto Expert. Short answer."}] + st.session_state.chat_history}, timeout=10)
+            st.session_state.chat_history.append({"role": "assistant", "content": res.text})
+        except: st.error("AI Error")
+    for m in st.session_state.chat_history[-4:]:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# 分页
-tab_market, tab_trade, tab_assets = st.tabs(["📊 Market", "📈 Trade", "💼 Portfolio"])
+tab_market, tab_trade, tab_assets = st.tabs(["📊 Market", "📈 Trade", "💼 Assets"])
 
-# --- 行情页 ---
 with tab_market:
     st.components.v1.html("""
-    <style>
-        body { background: transparent; color: white; font-family: -apple-system; }
-        .row { display: flex; justify-content: space-between; padding: 15px 5px; border-bottom: 1px solid #2C2C2E; }
-        .sym { font-weight: 600; }
-    </style>
-    <div id="list"></div>
+    <style>body { background: transparent; color: white; font-family: -apple-system; } .row { display: flex; justify-content: space-between; padding: 12px 5px; border-bottom: 1px solid #2C2C2E; font-size:14px; }</style>
+    <div id="l"></div>
     <script>
         const ws = new WebSocket('wss://data-stream.binance.vision:9443/ws/!ticker@arr');
-        const list = document.getElementById('list');
-        const targets = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','PEPEUSDT','ORDIUSDT','WLDUSDT'];
+        const ts = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','DOGEUSDT','PEPEUSDT','ORDIUSDT'];
         let els = {};
-        targets.forEach(t => {
+        ts.forEach(t => {
             let d = document.createElement('div'); d.className = 'row';
-            d.innerHTML = `<span class="sym">${t.replace('USDT','')}</span><span id="p-${t}">-</span><span id="c-${t}">-</span>`;
-            list.appendChild(d);
+            d.innerHTML = `<b>${t}</b><span id="p-${t}">-</span><span id="c-${t}">-</span>`;
+            document.getElementById('l').appendChild(d);
             els[t] = {p: document.getElementById(`p-${t}`), c: document.getElementById(`c-${t}`)};
         });
         ws.onmessage = (e) => {
-            JSON.parse(e.data).forEach(i => {
-                if(els[i.s]) {
-                    els[i.s].p.innerText = '$' + parseFloat(i.c).toFixed(i.s.includes('PEPE')?6:2);
-                    els[i.s].c.innerText = (i.P >= 0 ? '+' : '') + parseFloat(i.P).toFixed(2) + '%';
-                    els[i.s].c.style.color = i.P >= 0 ? '#34C759' : '#FF453A';
-                }
-            });
+            JSON.parse(e.data).forEach(i => { if(els[i.s]) {
+                els[i.s].p.innerText = '$' + parseFloat(i.c).toFixed(2);
+                els[i.s].c.innerText = parseFloat(i.P).toFixed(2) + '%';
+                els[i.s].c.style.color = i.P >= 0 ? '#34C759' : '#FF453A';
+            }});
         };
     </script>
-    """, height=450)
+    """, height=400)
 
-# --- 交易页 (全币种) ---
 with tab_trade:
-    # 全市场币种选择
-    target = st.selectbox("Select Asset", all_coins, index=all_coins.index("BTCUSDT"))
-    
+    target = st.selectbox("Market", all_coins, index=all_coins.index("BTCUSDT"))
     st.components.v1.html(f"""
-        <div id="tv" style="height:320px; border-radius:15px; overflow:hidden;"></div>
+        <div id="tv" style="height:300px; border-radius:15px; overflow:hidden;"></div>
         <script src="https://s3.tradingview.com/tv.js"></script>
-        <script>
-            new TradingView.widget({{
-                "autosize": true, "symbol": "BINANCE:{target}", "interval": "1",
-                "theme": "dark", "style": "1", "hide_top_toolbar": true, "container_id": "tv"
-            }});
-        </script>
-    """, height=320)
+        <script>new TradingView.widget({{"autosize":true,"symbol":"BINANCE:{target}","interval":"1","theme":"dark","style":"1","hide_top_toolbar":true,"container_id":"tv"}});</script>
+    """, height=300)
     
-    st.markdown(f"<div class='text-secondary'>Available Balance: {st.session_state.balance:,.2f} USDT</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='text-secondary'>Available: {st.session_state.balance:,.2f} USDT</div>", unsafe_allow_html=True)
     
-    # 金额输入与比例
-    amt = st.number_input("Order Size (Notional USDT)", min_value=1.0, value=10000.0, step=1000.0)
-    col_p1, col_p2, col_p3 = st.columns(3)
-    if col_p1.button("25% Balance"): amt = st.session_state.balance * 0.25 * 100 # 假设估算
-    if col_p2.button("50% Balance"): amt = st.session_state.balance * 0.50 * 100
-    if col_p3.button("100% Balance"): amt = st.session_state.balance * 1.0 * 100
-    
+    # 🌟 核心优化：建仓比例滑动条
     lev = st.slider("Leverage", 1, 1000, 100)
-    m_needed = amt / lev
+    # 用户拖动百分比，自动计算名义价值 (Notional = Balance * % * Leverage)
+    balance_percent = st.slider("Use % of Balance", 0, 100, 10)
+    suggested_amt = (st.session_state.balance * (balance_percent / 100)) * lev
     
-    c_buy, c_sell = st.columns(2)
-    with c_buy:
+    amt = st.number_input("Order Size (Notional USDT)", min_value=0.0, value=float(suggested_amt))
+    m_needed = amt / lev
+    st.caption(f"Margin Required: {m_needed:.2f} USDT")
+    
+    cb1, cb2 = st.columns(2)
+    with cb1:
         if st.button("BUY / LONG", use_container_width=True, type="primary"):
             p = get_price(target)
             if p > 0 and st.session_state.balance >= m_needed:
                 st.session_state.balance -= m_needed
                 st.session_state.positions.append({"交易对":target,"方向":"LONG","开仓价":p,"杠杆":lev,"名义价值":amt,"占用保证金":m_needed})
-                sync_data(); st.toast("Long Position Opened"); time.sleep(0.5); st.rerun()
-    with c_sell:
+                sync_data(); st.rerun()
+    with cb2:
         if st.button("SELL / SHORT", use_container_width=True):
             p = get_price(target)
             if p > 0 and st.session_state.balance >= m_needed:
                 st.session_state.balance -= m_needed
                 st.session_state.positions.append({"交易对":target,"方向":"SHORT","开仓价":p,"杠杆":lev,"名义价值":amt,"占用保证金":m_needed})
-                sync_data(); st.toast("Short Position Opened"); time.sleep(0.5); st.rerun()
+                sync_data(); st.rerun()
 
-# --- 持仓管理页 ---
 with tab_assets:
-    st.button("🔄 Full Reset (5M USDT)", on_click=lambda: (st.session_state.update({"balance":5000000.0,"positions":[]}), sync_data()))
+    if st.button("Reset Account", use_container_width=True):
+        st.session_state.update({"balance":5000000.0,"positions":[]}); sync_data(); st.rerun()
     
     if not st.session_state.positions:
-        st.info("No active positions.")
+        st.info("No Positions")
     else:
-        # 实时盈亏计算逻辑
+        # 获取实时价格
         try:
             r_p = requests.get("https://data-api.binance.vision/api/v3/ticker/price", timeout=2).json()
             p_map = {x['symbol']: float(x['price']) for x in r_p}
@@ -302,40 +245,35 @@ with tab_assets:
                 st.markdown(f"""
                 <div class="apple-card">
                     <div style="display:flex; justify-content:space-between;">
-                        <span style="font-weight:600;">{pos['交易对']} · {pos['方向']}</span>
-                        <span class="{'price-up' if pnl >=0 else 'price-down'}">{pnl:+.2f} USDT</span>
-                    </div>
-                    <div class="text-secondary" style="margin-top:5px;">
-                        Avg: {pos['开仓价']:.4f} | Cur: {now_p:.4f} | Lev: {pos['杠杆']}x
+                        <b>{pos['交易对']} · {pos['方向']}</b>
+                        <span class="{'price-up' if pnl>=0 else 'price-down'}">{pnl:+.2f} U</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 操作：平仓/加仓/减仓
-                col_m1, col_m2 = st.columns(2)
-                with col_m1:
-                    if st.button("Close Position", key=f"c_{idx}", use_container_width=True):
+                m1, m2 = st.columns(2)
+                with m1:
+                    if st.button("Close", key=f"c_{idx}", use_container_width=True):
                         st.session_state.balance += (pos['占用保证金'] + pnl)
                         st.session_state.positions.pop(idx)
                         sync_data(); st.rerun()
-                with col_m2:
-                    with st.popover("Adjust Size", use_container_width=True):
-                        st.caption("Add or Reduce Position")
-                        adj_amt = st.number_input("Amount (USDT)", key=f"adj_{idx}")
-                        if st.button("Confirm Add", key=f"add_{idx}"):
-                            # 简化加仓逻辑
+                with m2:
+                    with st.popover("Adjust", use_container_width=True):
+                        st.caption(f"Available: {st.session_state.balance:,.2f}")
+                        # 🌟 减仓比例滑动条
+                        adj_percent = st.slider("Adjust % of Position", 0, 100, 50, key=f"sl_{idx}")
+                        adj_amt = pos['名义价值'] * (adj_percent / 100)
+                        
+                        st.write(f"Adjusting: {adj_amt:.2f} USDT")
+                        if st.button("Add", key=f"a_{idx}"):
                             m_add = adj_amt / pos['杠杆']
                             if st.session_state.balance >= m_add:
                                 st.session_state.balance -= m_add
-                                pos['名义价值'] += adj_amt
-                                pos['占用保证金'] += m_add
+                                pos['名义价值'] += adj_amt; pos['占用保证金'] += m_add
                                 sync_data(); st.rerun()
-                        if st.button("Confirm Reduce", key=f"red_{idx}"):
-                            # 简化减仓逻辑
-                            ratio = min(adj_amt / pos['名义价值'], 1.0)
-                            pnl_realized = pnl * ratio
-                            st.session_state.balance += (pos['占用保证金'] * ratio + pnl_realized)
-                            pos['名义价值'] -= adj_amt
-                            pos['占用保证金'] *= (1-ratio)
-                            if pos['名义价值'] <= 0: st.session_state.positions.pop(idx)
+                        if st.button("Reduce", key=f"r_{idx}"):
+                            ratio = adj_percent / 100
+                            st.session_state.balance += (pos['占用保证金'] * ratio + pnl * ratio)
+                            pos['名义价值'] -= adj_amt; pos['占用保证金'] *= (1-ratio)
+                            if pos['名义价值'] < 1: st.session_state.positions.pop(idx)
                             sync_data(); st.rerun()
