@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import json
+import os
+import hashlib
 from openai import OpenAI
 
 # ==========================================
@@ -9,53 +12,126 @@ from openai import OpenAI
 # ==========================================
 st.set_page_config(page_title="Crypto 模拟终端", layout="centered", initial_sidebar_state="collapsed")
 
-# 优化手机端间距、大字号余额
+# 1. 修复顶部被挡住的问题 (加大 padding-top)
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.5rem; padding-bottom: 5rem; }
-    .balance-text { font-size: 1.8rem; font-weight: bold; color: #0ecb81; }
+    .block-container { padding-top: 3.5rem; padding-bottom: 5rem; }
+    .balance-text { font-size: 1.8rem; font-weight: bold; color: #0ecb81; margin-bottom: 10px; }
+    .title-text { font-size: 1.5rem; font-weight: bold; color: #fff; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 初始化系统状态
+# 1. 本地数据库引擎 (JSON 持久化)
 # ==========================================
-if 'balance' not in st.session_state:
-    st.session_state.balance = 5000000.0  
-if 'positions' not in st.session_state:
-    st.session_state.positions = []       
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'market_summary' not in st.session_state:
-    st.session_state.market_summary = "暂无最新行情"
+DATA_FILE = "trading_data.json"
 
+def load_db():
+    if not os.path.exists(DATA_FILE):
+        return {"users": {}}
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_db(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def sync_current_user_data():
+    """将当前 session 的资金和持仓同步保存到数据库"""
+    if st.session_state.get('logged_in'):
+        db = load_db()
+        username = st.session_state.username
+        db["users"][username]["balance"] = st.session_state.balance
+        db["users"][username]["positions"] = st.session_state.positions
+        save_db(db)
+
+# ==========================================
+# 2. 账号注册与登录系统
+# ==========================================
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.markdown('<div class="title-text">⚡ Crypto 模拟引擎系统</div>', unsafe_allow_html=True)
+    st.caption("请先登录或注册账号以保存您的交易数据")
+    
+    tab_login, tab_register = st.tabs(["🔑 登录", "📝 注册新账号"])
+    
+    with tab_login:
+        with st.form("login_form"):
+            l_user = st.text_input("用户名")
+            l_pass = st.text_input("密码", type="password")
+            submit_login = st.form_submit_button("登 录", use_container_width=True)
+            
+            if submit_login:
+                db = load_db()
+                if l_user in db["users"] and db["users"][l_user]["password"] == hash_password(l_pass):
+                    st.session_state.logged_in = True
+                    st.session_state.username = l_user
+                    st.session_state.balance = db["users"][l_user]["balance"]
+                    st.session_state.positions = db["users"][l_user]["positions"]
+                    st.session_state.chat_history = []
+                    st.session_state.market_summary = "暂无最新行情"
+                    st.success("登录成功！正在进入交易终端...")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("用户名或密码错误！")
+                    
+    with tab_register:
+        with st.form("register_form"):
+            r_user = st.text_input("设置用户名")
+            r_pass = st.text_input("设置密码", type="password")
+            submit_register = st.form_submit_button("注 册", use_container_width=True)
+            
+            if submit_register:
+                db = load_db()
+                if not r_user or not r_pass:
+                    st.warning("用户名和密码不能为空！")
+                elif r_user in db["users"]:
+                    st.error("该用户名已被注册，请换一个！")
+                else:
+                    db["users"][r_user] = {
+                        "password": hash_password(r_pass),
+                        "balance": 5000000.0, # 初始资金
+                        "positions": []
+                    }
+                    save_db(db)
+                    st.success("注册成功！请切换到【登录】面板进行登录。")
+                    
+    st.stop() # 阻断后续代码运行，直到用户登录成功
+
+# ==========================================
+# 3. 核心功能 (仅登录后可见)
+# ==========================================
 def reset_balance():
     st.session_state.balance = 5000000.0
     st.session_state.positions = []
-    st.toast("✅ 资金已重置为 5,000,000 USDT！", icon="💰")
+    sync_current_user_data() # 同步到数据库
+    st.toast("✅ 资金已重置为 5,000,000 USDT，并保存至云端！", icon="💰")
 
-# ==========================================
-# 2. 全市场币种获取 (缓存防卡顿)
-# ==========================================
-@st.cache_data(ttl=600) # 缓存10分钟，避免每次刷新重新拉取几千个币种列表
+def logout():
+    st.session_state.clear()
+    st.rerun()
+
+@st.cache_data(ttl=600) 
 def get_all_usdt_symbols():
-    """获取币安所有正在交易的 USDT 合约/现货全市场币种"""
     try:
         res = requests.get("https://data-api.binance.vision/api/v3/exchangeInfo", timeout=5)
         data = res.json()
-        # 过滤出所有以 USDT 结尾且状态为 TRADING 的币种
         symbols = [s['symbol'] for s in data['symbols'] if s['symbol'].endswith('USDT') and s['status'] == 'TRADING']
-        # 把主流币排在前面
         main_coins = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT"]
         others = [s for s in symbols if s not in main_coins]
         return main_coins + others
     except:
-        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"] # 断网时的后备方案
+        return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"] 
 
 all_symbols = get_all_usdt_symbols()
 
 def get_single_price(symbol):
-    """下单瞬间精准获取单币价格"""
     try:
         res = requests.get(f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}", timeout=3)
         return float(res.json().get('price', 0))
@@ -63,11 +139,11 @@ def get_single_price(symbol):
         return 0.0
 
 # ==========================================
-# 3. 顶部导航、全局余额与 AI
+# 4. 顶部导航、全局余额与 AI
 # ==========================================
-col_title, col_ai = st.columns([3, 1])
+col_title, col_ai, col_exit = st.columns([5, 2, 2])
 with col_title:
-    st.markdown("### ⚡ Crypto 模拟引擎")
+    st.markdown('<div class="title-text">⚡ Crypto 模拟引擎</div>', unsafe_allow_html=True)
 with col_ai:
     with st.popover("🤖 AI", use_container_width=True):
         api_key = st.text_input("DeepSeek Key", type="password", placeholder="填入 API Key")
@@ -83,24 +159,25 @@ with col_ai:
                 st.session_state.chat_history.append({"role": "assistant", "content": full_res})
             except:
                 st.error("API 异常")
+with col_exit:
+    if st.button("🚪 退出", use_container_width=True):
+        logout()
 
-# 🚨 全局高亮余额显示，无论切到哪个 Tab 都能看到！
+# 🚨 全局高亮余额展示
+st.caption(f"欢迎回来，交易员：**{st.session_state.username}**")
 st.markdown(f'<div class="balance-text">💰 余额: {st.session_state.balance:,.2f} U</div>', unsafe_allow_html=True)
 st.divider()
 
 # ==========================================
-# 4. 移动端优化三大核心板块
+# 5. 移动端优化三大核心板块
 # ==========================================
 tab_market, tab_trade, tab_assets = st.tabs(["📊 行情", "📈 交易", "💼 资产与持仓"])
 
-# --- 模块 1：全市场行情 (使用 Fragment 实现每 3 秒无感自动刷新) ---
 @st.fragment(run_every=3)
 def render_market_tab():
     try:
-        # 抓取全网 24h 行情
         res = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=3)
         data = res.json()
-        # 过滤并排序（按成交量排名前 150，防止手机浏览器卡顿）
         usdt_data = [d for d in data if d['symbol'].endswith('USDT')]
         usdt_data.sort(key=lambda x: float(x['quoteVolume']), reverse=True)
         
@@ -120,9 +197,7 @@ def render_market_tab():
 with tab_market:
     render_market_tab()
 
-# --- 模块 2：交易面板 (图表与下单) ---
 with tab_trade:
-    # 下拉框现在支持全市场几千个币种！格式化显示为 BTC/USDT
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
     
     st.components.v1.html(
@@ -150,7 +225,8 @@ with tab_trade:
             if price > 0 and st.session_state.balance >= margin_req:
                 st.session_state.balance -= margin_req
                 st.session_state.positions.append({"方向": "做多 🟢", "交易对": tv_symbol, "杠杆": leverage, "名义价值": amount, "占用保证金": margin_req, "开仓价": price})
-                st.toast(f"✅ 做多 {tv_symbol} 成功！")
+                sync_current_user_data() # 落库保存
+                st.toast(f"✅ 做多 {tv_symbol} 成功！数据已保存。")
                 time.sleep(0.5)
                 st.rerun()
             else:
@@ -161,20 +237,19 @@ with tab_trade:
             if price > 0 and st.session_state.balance >= margin_req:
                 st.session_state.balance -= margin_req
                 st.session_state.positions.append({"方向": "做空 🔴", "交易对": tv_symbol, "杠杆": leverage, "名义价值": amount, "占用保证金": margin_req, "开仓价": price})
-                st.toast(f"✅ 做空 {tv_symbol} 成功！")
+                sync_current_user_data() # 落库保存
+                st.toast(f"✅ 做空 {tv_symbol} 成功！数据已保存。")
                 time.sleep(0.5)
                 st.rerun()
             else:
                 st.error("失败：余额不足或网络波动")
 
-# --- 模块 3：资产与持仓 (使用 Fragment 实现每 2 秒无感自动结算盈亏) ---
 @st.fragment(run_every=2)
 def render_positions_and_pnl():
     if not st.session_state.positions:
         st.info("📦 当前暂无持仓")
         return
 
-    # 1. 极速精准拉取当前所有持仓币种的最新价
     symbols_needed = list(set([p['交易对'] for p in st.session_state.positions]))
     symbols_query = '["' + '","'.join(symbols_needed) + '"]'
     prices_dict = {}
@@ -183,9 +258,8 @@ def render_positions_and_pnl():
         for item in res.json():
             prices_dict[item['symbol']] = float(item['price'])
     except:
-        pass # 断网时暂时使用上一次的价格
+        pass 
 
-    # 2. 计算实时盈亏与爆仓拦截
     active_positions = []
     for pos in st.session_state.positions:
         sym = pos["交易对"]
@@ -196,18 +270,22 @@ def render_positions_and_pnl():
         else: 
             pnl = (pos["开仓价"] - current_price) / pos["开仓价"] * pos["名义价值"]
         
-        # 爆仓判定 (1000倍杠杆核心机制)
         if pnl <= -pos["占用保证金"]:
-            st.error(f"🚨 爆仓！{sym} {pos['方向']} 遭强平！损失保证金: {pos['占用保证金']:.2f} U")
+            st.error(f"🚨 爆仓！{sym} {pos['方向']} 遭强平！")
+            sync_current_user_data() # 爆仓后立刻保存
             continue 
         
         pos["当前价"] = current_price
         pos["未实现盈亏"] = pnl
         active_positions.append(pos)
         
-    st.session_state.positions = active_positions
+    # 如果因为爆仓导致仓位减少，同步数据库
+    if len(active_positions) != len(st.session_state.positions):
+        st.session_state.positions = active_positions
+        sync_current_user_data()
+    else:
+        st.session_state.positions = active_positions
 
-    # 3. 渲染炫酷的动态卡片
     st.caption("🔄 持仓盈亏每 2 秒自动跳动更新")
     for pos in active_positions:
         with st.container(border=True):
@@ -229,20 +307,19 @@ def render_positions_and_pnl():
 with tab_assets:
     col_reset, col_close = st.columns(2)
     with col_reset:
-        st.button("🔄 重置 500 万体验金", on_click=reset_balance, use_container_width=True)
+        st.button("🔄 重置资金", on_click=reset_balance, use_container_width=True)
     with col_close:
-        # 一键平仓按钮放在自动刷新区域之外，点击触发全局重载交割
-        if st.button("⚡ 一键全部平仓", type="primary", use_container_width=True):
+        if st.button("⚡ 一键全平", type="primary", use_container_width=True):
             if st.session_state.positions:
                 total_return = sum([p["占用保证金"] + p.get("未实现盈亏", 0) for p in st.session_state.positions])
                 st.session_state.balance += total_return
                 st.session_state.positions = [] 
-                st.toast(f"✅ 成功平仓！连本带利返回 {total_return:.2f} USDT", icon="💸")
+                sync_current_user_data() # 落库保存结算后的总资金
+                st.toast(f"✅ 平仓结算成功！总资产已更新保存。", icon="💸")
                 time.sleep(0.5)
                 st.rerun()
             else:
                 st.toast("当前无持仓", icon="ℹ️")
                 
     st.divider()
-    # 挂载局部自动刷新的持仓监控台
     render_positions_and_pnl()
