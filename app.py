@@ -10,7 +10,7 @@ from urllib.parse import quote
 from datetime import datetime
 
 # ==========================================
-# 0. 全局 UI 配置 - Apple 极简白
+# 0. UI 配置 - Apple 极简白 (Light Style)
 # ==========================================
 st.set_page_config(page_title="Crypto Terminal Pro", layout="centered", initial_sidebar_state="collapsed")
 
@@ -23,17 +23,18 @@ st.markdown("""
     }
     .block-container { padding-top: 2rem; padding-bottom: 5rem; }
     
+    /* 苹果风格卡片 */
     .apple-card {
         background: #FFFFFF;
         border-radius: 20px;
         padding: 22px;
-        margin-bottom: 18px;
+        margin-bottom: 15px;
         box-shadow: 0 8px 30px rgba(0,0,0,0.04);
         border: 1px solid rgba(0,0,0,0.02);
     }
     
     .balance-header {
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.85);
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
         border-radius: 24px;
@@ -41,11 +42,12 @@ st.markdown("""
         text-align: center;
         margin-bottom: 25px;
         border: 1px solid rgba(0,0,0,0.05);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.02);
     }
     
+    .text-secondary { color: #86868B; font-size: 0.85rem; }
     .price-up { color: #34C759; font-weight: 600; }
     .price-down { color: #FF3B30; font-weight: 600; }
-    .text-secondary { color: #86868B; font-size: 0.85rem; }
     
     .stButton>button { border-radius: 12px; background-color: #007AFF; color: white; font-weight: 600; border: none; }
     header {visibility: hidden;} footer {visibility: hidden;}
@@ -53,16 +55,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 数据库引擎 (自愈增强版)
+# 1. 数据库引擎 (自愈机制)
 # ==========================================
-DATA_FILE = "trading_v10_fix.json"
+DATA_FILE = "trading_v11_final.json"
 
 def load_db():
     if not os.path.exists(DATA_FILE): return {"users": {}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {"users": {}}
+            d = json.load(f)
+            return d if isinstance(d, dict) else {"users": {}}
     except: return {"users": {}}
 
 def save_db(data):
@@ -80,7 +82,7 @@ def sync_data():
             save_db(db)
 
 # ==========================================
-# 2. 账号安全系统 (彻底修复 AttributeError)
+# 2. 账号系统 (强制初始化 history)
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'history' not in st.session_state: st.session_state.history = []
@@ -92,11 +94,10 @@ if tok and not st.session_state.logged_in:
     for u, info in db["users"].items():
         if info.get("session_token") == tok:
             st.session_state.update({
-                "logged_in": True,
-                "username": u,
+                "logged_in": True, "username": u,
                 "balance": info.get("balance", 5000000.0),
                 "positions": info.get("positions", []),
-                "history": info.get("history", []), # 核心修复点
+                "history": info.get("history", []),
                 "chat_history": []
             })
             break
@@ -108,7 +109,7 @@ if not st.session_state.logged_in:
         with st.form("l"):
             u = st.text_input("用户名")
             p = st.text_input("密码", type="password")
-            if st.form_submit_button("进入终端", use_container_width=True):
+            if st.form_submit_button("登录", use_container_width=True):
                 hp = hashlib.sha256(p.encode()).hexdigest()
                 if u in db["users"] and db["users"][u]["password"] == hp:
                     tk = str(uuid.uuid4())
@@ -122,15 +123,15 @@ if not st.session_state.logged_in:
                         "chat_history": []
                     })
                     st.rerun()
-                else: st.error("登录失败，请检查账号密码")
+                else: st.error("登录失败")
     with t2:
         with st.form("r"):
             nu = st.text_input("新用户名")
             np = st.text_input("设置密码", type="password")
-            if st.form_submit_button("立即领取 500万 U", use_container_width=True):
+            if st.form_submit_button("注册并领取 500w USDT", use_container_width=True):
                 if nu and np and nu not in db["users"]:
                     db["users"][nu] = {"password":hashlib.sha256(np.encode()).hexdigest(),"balance":5000000.0,"positions":[],"history":[],"session_token":""}
-                    save_db(db); st.success("开户成功！请切换到登录页。")
+                    save_db(db); st.success("开户成功！请登录")
     st.stop()
 
 # ==========================================
@@ -152,52 +153,72 @@ def get_price(sym):
 all_coins = get_all_symbols()
 
 # ==========================================
-# 4. 可拖拽 AI 浮窗 (修复显示问题)
+# 4. 【重置与系统】挪到顶部账户区
 # ==========================================
-# 这里的 height 改为 1 以确保浏览器渲染 JS
+c_user, c_sys = st.columns([7, 2])
+with c_user: st.markdown(f"**{st.session_state.username}** · Terminal Pro")
+with c_sys:
+    with st.popover("⚙️ 管理"):
+        if st.button("🔄 重置账户 (5M U)", use_container_width=True):
+            st.session_state.update({"balance":5000000.0, "positions":[], "history":[]})
+            sync_data(); st.rerun()
+        if st.button("🚪 安全退出", use_container_width=True):
+            st.query_params.clear(); st.session_state.clear(); st.rerun()
+
+# ==========================================
+# 5. 【AI 浮窗】增强注入 - 确保可见且可拖拽
+# ==========================================
 st.components.v1.html(f"""
-<div id="ai-win" style="position:fixed; top:200px; right:20px; width:300px; z-index:99999; background:rgba(255,255,255,0.9); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-radius:20px; box-shadow:0 10px 40px rgba(0,0,0,0.1); border:1px solid rgba(0,0,0,0.05); overflow:hidden; display:flex; flex-direction:column;">
-    <div id="ai-header" style="padding:15px; background:rgba(0,122,255,0.1); cursor:move; display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-weight:600; font-size:14px; color:#007AFF;">🤖 AI 交易助理 (按住此栏拖动)</span>
-        <div style="width:8px; height:8px; background:#34C759; border-radius:50%;"></div>
-    </div>
-    <div id="ai-body" style="height:280px; padding:15px; overflow-y:auto; font-size:13px; color:#1D1D1F; background:rgba(255,255,255,0.5);">
-        <div style="background:white; padding:10px; border-radius:12px; margin-bottom:15px; border:1px solid rgba(0,0,0,0.03);">
-            你好，我是内置分析师。你可以根据你当前的 <b>{st.session_state.balance:,.0f} U</b> 资产情况向我提问。
+<div id="ai-drag-container" style="position:fixed; top:150px; right:20px; width:300px; z-index:999999; pointer-events:auto;">
+    <div id="ai-window" style="background:rgba(255,255,255,0.9); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-radius:20px; box-shadow:0 10px 40px rgba(0,0,0,0.15); border:1px solid rgba(0,0,0,0.1); overflow:hidden; display:flex; flex-direction:column; font-family:-apple-system, sans-serif;">
+        <div id="ai-header" style="padding:15px; background:rgba(0,122,255,0.1); cursor:move; display:flex; justify-content:space-between; align-items:center; user-select:none;">
+            <span style="font-weight:600; font-size:14px; color:#007AFF;">🤖 AI 交易助理 (按住此栏拖动)</span>
+            <div style="width:8px; height:8px; background:#34C759; border-radius:50%;"></div>
         </div>
-        <div id="msgs"></div>
-    </div>
-    <div style="padding:15px; background:white; border-top:1px solid rgba(0,0,0,0.05);">
-        <input type="text" id="ai-in" placeholder="询问分析建议..." style="width:100%; border:1px solid #E5E5E7; border-radius:12px; padding:10px; outline:none; font-size:13px;">
+        <div id="ai-body" style="height:250px; padding:15px; overflow-y:auto; font-size:13px; color:#1D1D1F;">
+            <div style="background:white; padding:10px; border-radius:12px; margin-bottom:12px; border:1px solid #F0F0F0;">
+                你好！我是内置助理。当前余额: <b>{st.session_state.balance:,.0f} U</b>。有什么可以帮你的？
+            </div>
+            <div id="msgs"></div>
+        </div>
+        <div style="padding:12px; background:white; border-top:1px solid #F0F0F0;">
+            <input type="text" id="ai-in" placeholder="问问市场趋势..." style="width:100%; border:1px solid #E5E5E7; border-radius:10px; padding:8px; outline:none; font-size:13px;">
+        </div>
     </div>
 </div>
 <script>
-    function drag(e){{
-        var p1=0,p2=0,p3=0,p4=0;
-        const h = document.getElementById(e.id+"header");
-        h.onmousedown = function(e){{
+    function makeDraggable(el) {{
+        var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        const header = document.getElementById(el.id + "header");
+        header.onmousedown = dragMouseDown;
+        function dragMouseDown(e) {{
             e = e || window.event; e.preventDefault();
-            p3 = e.clientX; p4 = e.clientY;
-            document.onmouseup = function(){{document.onmouseup=null; document.onmousemove=null;}};
-            document.onmousemove = function(e){{
-                e = e || window.event; e.preventDefault();
-                p1 = p3 - e.clientX; p2 = p4 - e.clientY;
-                p3 = e.clientX; p4 = e.clientY;
-                const win = document.getElementById("ai-win");
-                win.style.top = (win.offsetTop - p2) + "px";
-                win.style.left = (win.offsetLeft - p1) + "px";
-            }};
-        }};
+            pos3 = e.clientX; pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }}
+        function elementDrag(e) {{
+            e = e || window.event; e.preventDefault();
+            pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+            pos3 = e.clientX; pos4 = e.clientY;
+            const container = document.getElementById("ai-drag-container");
+            container.style.top = (container.offsetTop - pos2) + "px";
+            container.style.left = (container.offsetLeft - pos1) + "px";
+        }}
+        function closeDragElement() {{
+            document.onmouseup = null; document.onmousemove = null;
+        }}
     }}
-    drag(document.getElementById("ai-win"));
+    makeDraggable(document.getElementById("ai-window"));
+    
     const input = document.getElementById('ai-in'), msgs = document.getElementById('msgs');
     input.addEventListener('keypress', function(e){{
         if(e.key === 'Enter' && input.value.trim() !== "") {{
             const val = input.value; input.value = "";
-            msgs.innerHTML += `<div style="text-align:right; margin-bottom:12px;"><span style="background:#007AFF; color:white; padding:8px 12px; border-radius:12px; display:inline-block;">${{val}}</span></div>`;
-            fetch(`https://text.pollinations.ai/system:你是加密专家。用户余额:{st.session_state.balance}。回答中文精简。问:${{val}}?model=openai`)
+            msgs.innerHTML += `<div style="text-align:right; margin-bottom:10px;"><span style="background:#007AFF; color:white; padding:6px 12px; border-radius:12px; display:inline-block;">${{val}}</span></div>`;
+            fetch(`https://text.pollinations.ai/你是中文加密专家。当前余额:{st.session_state.balance}。用户问:${{val}}?model=openai`)
                 .then(r => r.text()).then(d => {{
-                    msgs.innerHTML += `<div style="margin-bottom:12px;"><span style="background:white; padding:8px 12px; border-radius:12px; border:1px solid #EEE; display:inline-block;">${{d}}</span></div>`;
+                    msgs.innerHTML += `<div style="margin-bottom:10px;"><span style="background:white; padding:6px 12px; border-radius:12px; border:1px solid #EEE; display:inline-block;">${{d}}</span></div>`;
                     document.getElementById('ai-body').scrollTop = document.getElementById('ai-body').scrollHeight;
                 }});
         }}
@@ -206,9 +227,8 @@ st.components.v1.html(f"""
 """, height=1)
 
 # ==========================================
-# 5. 主页面布局
+# 6. 资产看板与 Tab 分页
 # ==========================================
-# 顶部总资产
 tm = sum(p['占用保证金'] for p in st.session_state.positions)
 st.markdown(f"""
 <div class="balance-header">
@@ -230,7 +250,7 @@ with tabs[0]:
         const b = document.getElementById('l'), ws = new WebSocket('wss://data-stream.binance.vision:9443/ws/!ticker@arr');
         let cache = {};
         ws.onmessage = (e) => {
-            JSON.parse(e.data).filter(i => i.s.endsWith('USDT')).sort((x, y) => parseFloat(y.q) - parseFloat(x.q)).slice(0, 80).forEach(i => {
+            JSON.parse(e.data).filter(i => i.s.endswith('USDT')).sort((x, y) => parseFloat(y.q) - parseFloat(x.q)).slice(0, 80).forEach(i => {
                 if(!cache[i.s]) { let d = document.createElement('div'); d.className = 'item'; b.appendChild(d); cache[i.s] = d; }
                 const up = parseFloat(i.P) >= 0;
                 cache[i.s].innerHTML = `<b>${i.s.replace('USDT','')}</b><div style="text-align:right"><b>$${parseFloat(i.c).toFixed(i.s.includes('PEPE')?6:2)}</b><div style="color:${up?'#34C759':'#FF3B30'}">${up?'+':''}${parseFloat(i.P).toFixed(2)}%</div></div>`;
@@ -239,7 +259,7 @@ with tabs[0]:
     </script>
     """, height=420)
 
-# --- Tab 2: 交易 (独立双滑块) ---
+# --- Tab 2: 交易 (独立双金额滑块) ---
 with tabs[1]:
     target = st.selectbox("搜索币种", all_coins, index=all_coins.index("BTCUSDT"))
     st.components.v1.html(f"""
@@ -250,7 +270,7 @@ with tabs[1]:
     
     st.markdown(f"**可用余额: {st.session_state.balance:,.2f} USDT**")
     
-    # 🌟 独立双滑块核心逻辑
+    # 🌟 独立双滑块
     actual_margin = st.slider("1. 选择投入本金 (保证金金额)", 0.0, float(st.session_state.balance), float(st.session_state.balance * 0.1), step=100.0)
     leverage = st.slider("2. 选择杠杆倍数 (Leverage)", 1, 1000, 100)
     notional = actual_margin * leverage
@@ -274,9 +294,6 @@ with tabs[1]:
 
 # --- Tab 3: 持仓管理 ---
 with tabs[2]:
-    if st.button("🔄 重置 500 万账户", use_container_width=True):
-        st.session_state.update({"balance":5000000.0,"positions":[],"history":[]}); sync_data(); st.rerun()
-    
     if not st.session_state.positions:
         st.info("当前暂无持仓")
     else:
@@ -295,14 +312,13 @@ with tabs[2]:
                 m1, m2 = st.columns(2)
                 with m1:
                     if st.button("全平结算", key=f"cl_{i}", use_container_width=True):
-                        # 🌟 写入历史记录并同步
                         st.session_state.history.insert(0, {"时间": datetime.now().strftime("%m-%d %H:%M"), "币种": pos['交易对'], "方向": pos['方向'], "盈亏": round(pnl, 2), "价格": now_p})
                         st.session_state.balance += (pos['占用保证金'] + pnl)
                         st.session_state.positions.pop(i); sync_data(); st.rerun()
                 with m2:
                     with st.popover("调整规模", use_container_width=True):
-                        adj_v = st.slider("调整金额", 0.0, float(st.session_state.balance), 1000.0, key=f"as_{i}")
-                        if st.button("补仓 (Add)", key=f"ad_{i}", use_container_width=True):
+                        adj_v = st.slider("金额", 0.0, float(st.session_state.balance), 1000.0, key=f"as_{i}")
+                        if st.button("加仓 (Add)", key=f"ad_{i}", use_container_width=True):
                             if st.session_state.balance >= adj_v:
                                 st.session_state.balance -= adj_v
                                 pos['名义价值'] += (adj_v * pos['杠杆']); pos['占用保证金'] += adj_v
