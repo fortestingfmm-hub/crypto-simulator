@@ -6,6 +6,7 @@ import json
 import os
 import hashlib
 import uuid
+from urllib.parse import quote
 
 # ==========================================
 # 0. UI 配置 - Apple 极简白 (Light Mode)
@@ -22,7 +23,6 @@ st.markdown("""
     }
     .block-container { padding-top: 4rem; padding-bottom: 5rem; }
     
-    /* 苹果风格卡片 */
     .apple-card {
         background: #FFFFFF;
         border-radius: 20px;
@@ -32,7 +32,6 @@ st.markdown("""
         border: 1px solid rgba(0,0,0,0.02);
     }
     
-    /* 顶部悬浮余额栏 (毛玻璃) */
     .balance-header {
         background: rgba(255, 255, 255, 0.85);
         backdrop-filter: blur(20px);
@@ -45,43 +44,35 @@ st.markdown("""
         border: 1px solid rgba(0,0,0,0.05);
         text-align: center;
         margin-bottom: 30px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.03);
     }
     
     .text-secondary { color: #86868B; font-size: 0.85rem; }
     .price-up { color: #34C759; font-weight: 600; }
     .price-down { color: #FF3B30; font-weight: 600; }
     
-    /* 苹果蓝按钮 */
     .stButton>button {
         border-radius: 12px;
-        border: none;
         background-color: #007AFF;
         color: white;
         font-weight: 600;
-        padding: 12px 24px;
-        transition: all 0.2s ease;
+        border: none;
+        padding: 10px 20px;
     }
-    .stButton>button:active { transform: scale(0.96); }
     
     header {visibility: hidden;} footer {visibility: hidden;}
-    
-    /* 隐藏表格索引 */
-    [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # 1. 数据库引擎
 # ==========================================
-DATA_FILE = "trading_v6_full.json"
+DATA_FILE = "trading_v7_stable.json"
 
 def load_db():
     if not os.path.exists(DATA_FILE): return {"users": {}}
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            c = f.read()
-            return json.loads(c) if c else {"users": {}}
+            return json.load(f)
     except: return {"users": {}}
 
 def save_db(data):
@@ -98,11 +89,12 @@ def sync_data():
             save_db(db)
 
 # ==========================================
-# 2. 账号安全系统
+# 2. 账号系统
 # ==========================================
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 db = load_db()
 
+# 免密登录逻辑
 tok = st.query_params.get("token")
 if tok and not st.session_state.logged_in:
     for u, info in db["users"].items():
@@ -111,13 +103,13 @@ if tok and not st.session_state.logged_in:
             break
 
 if not st.session_state.logged_in:
-    st.markdown("<h2 style='text-align:center; color:#1D1D1F;'>Crypto Terminal</h2>", unsafe_allow_html=True)
-    t1, t2 = st.tabs(["登录账户", "创建新账户"])
+    st.markdown("<h2 style='text-align:center;'>Crypto Terminal</h2>", unsafe_allow_html=True)
+    t1, t2 = st.tabs(["登录", "注册"])
     with t1:
         with st.form("l"):
             u = st.text_input("用户名")
             p = st.text_input("密码", type="password")
-            if st.form_submit_button("安全登录", use_container_width=True):
+            if st.form_submit_button("进入终端", use_container_width=True):
                 hp = hashlib.sha256(p.encode()).hexdigest()
                 if u in db["users"] and db["users"][u]["password"] == hp:
                     tk = str(uuid.uuid4())
@@ -125,19 +117,19 @@ if not st.session_state.logged_in:
                     save_db(db); st.query_params["token"] = tk
                     st.session_state.update({"logged_in":True,"username":u,"balance":db["users"][u]["balance"],"positions":db["users"][u]["positions"],"chat_history":[]})
                     st.rerun()
-                else: st.error("登录失败")
+                else: st.error("账号或密码不对")
     with t2:
         with st.form("r"):
             nu = st.text_input("新用户名")
             np = st.text_input("设置密码", type="password")
-            if st.form_submit_button("注册获取 500万 U", use_container_width=True):
+            if st.form_submit_button("立即注册", use_container_width=True):
                 if nu and np and nu not in db["users"]:
                     db["users"][nu] = {"password":hashlib.sha256(np.encode()).hexdigest(),"balance":5000000.0,"positions":[],"session_token":""}
                     save_db(db); st.success("注册成功！")
     st.stop()
 
 # ==========================================
-# 3. 实时价格与 AI
+# 3. 核心 API 与 AI (修复版)
 # ==========================================
 @st.cache_data(ttl=600)
 def get_all_symbols():
@@ -155,69 +147,78 @@ def get_price(sym):
 all_coins = get_all_symbols()
 
 # ==========================================
-# 4. 主 UI 渲染
+# 4. 主界面
 # ==========================================
-with st.expander("🤖 AI 投资助理 (中文)"):
-    u_q = st.chat_input("询问市场趋势...")
+# 🌟 修复版 AI 助理
+with st.expander("🤖 AI 智能投顾 (免 Key 免费版)"):
+    st.caption("AI 助手现已接入实时资产感知")
+    u_q = st.chat_input("询问市场分析或持仓建议...")
     if u_q:
         st.session_state.chat_history.append({"role": "user", "content": u_q})
         try:
-            res = requests.post("https://text.pollinations.ai/", json={"messages": [{"role":"system","content":"Crypto Pro"}] + st.session_state.chat_history}, timeout=10)
-            st.session_state.chat_history.append({"role": "assistant", "content": res.text})
-        except: st.error("AI 暂时休息")
+            # 使用更稳定的 GET 模式调用 Pollinations AI
+            # 加上上下文：余额和持仓数
+            context = f"用户余额{st.session_state.balance}U,持仓{len(st.session_state.positions)}个。"
+            full_prompt = quote(f"System: 你是中文加密专家。数据:{context}。User: {u_q}")
+            
+            with st.spinner("AI 正在分析盘面..."):
+                res = requests.get(f"https://text.pollinations.ai/{full_prompt}?model=openai&cache=false", timeout=15)
+            
+            if res.status_code == 200:
+                st.session_state.chat_history.append({"role": "assistant", "content": res.text})
+            else:
+                st.error("AI 节点响应繁忙，请稍后再试。")
+        except:
+            st.error("AI 连接超时，请检查网络。")
+    
     for m in st.session_state.chat_history[-2:]:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-# 苹果风格资产看板
+# 余额中心
 total_margin = sum(p['占用保证金'] for p in st.session_state.positions)
 st.markdown(f"""
 <div class="balance-header">
-    <div class="text-secondary">实时总资产 (USDT)</div>
+    <div class="text-secondary">总权益估值 (USDT)</div>
     <div style="font-size: 2.2rem; font-weight: 600; color: #1D1D1F; letter-spacing: -1.2px;">
         {st.session_state.balance + total_margin:,.2f}
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-tabs = st.tabs(["📊 行情", "📈 交易", "💼 资产"])
+tabs = st.tabs(["📊 行情表", "📈 交易下单", "💼 持仓中心"])
 
-# --- Tab 1: 全市场毫秒行情瀑布流 ---
+# --- 行情表 ---
 with tabs[0]:
     st.components.v1.html("""
     <style>
         body { background: transparent; color: #1D1D1F; font-family: -apple-system; margin:0; }
-        .list-container { height: 450px; overflow-y: auto; padding-right: 5px; }
-        .item { display: flex; justify-content: space-between; padding: 14px 8px; border-bottom: 1px solid #E5E5E7; align-items: center; }
+        .list { height: 450px; overflow-y: auto; }
+        .item { display: flex; justify-content: space-between; padding: 15px 8px; border-bottom: 1px solid #E5E5E7; align-items: center; }
         .sym { font-weight: 600; font-size: 15px; }
-        .vol { font-size: 10px; color: #8E8E93; }
         .up { color: #34C759; } .down { color: #FF3B30; }
     </style>
-    <div class="list-container" id="l"></div>
+    <div class="list" id="l"></div>
     <script>
         const b = document.getElementById('l');
         const ws = new WebSocket('wss://data-stream.binance.vision:9443/ws/!ticker@arr');
         let cache = {};
-        
         ws.onmessage = (e) => {
-            const data = JSON.parse(e.data).filter(i => i.s.endsWith('USDT'));
-            // 按成交额排序取前 200 个，保证流畅度
-            data.sort((x, y) => parseFloat(y.q) - parseFloat(x.q)).slice(0, 200).forEach(i => {
+            const data = JSON.parse(e.data).filter(i => i.s.endswith('USDT'));
+            data.sort((x, y) => parseFloat(y.q) - parseFloat(x.q)).slice(0, 150).forEach(i => {
                 if(!cache[i.s]) {
-                    let d = document.createElement('div'); d.className = 'item'; d.id = 'row-'+i.s;
-                    b.appendChild(d);
-                    cache[i.s] = d;
+                    let d = document.createElement('div'); d.className = 'item'; b.appendChild(d); cache[i.s] = d;
                 }
-                const colorClass = parseFloat(i.P) >= 0 ? 'up' : 'down';
+                const isUp = parseFloat(i.P) >= 0;
                 cache[i.s].innerHTML = `
-                    <div><div class="sym">${i.s.replace('USDT','')}</div><div class="vol">Vol: ${(parseFloat(i.q)/1000000).toFixed(1)}M</div></div>
-                    <div style="text-align:right"><div style="font-weight:600">$${parseFloat(i.c).toFixed(i.s.includes('PEPE')?6:2)}</div><div class="${colorClass}">${parseFloat(i.P).toFixed(2)}%</div></div>
+                    <div><div class="sym">${i.s.replace('USDT','')}</div></div>
+                    <div style="text-align:right"><b>$${parseFloat(i.c).toFixed(i.s.includes('PEPE')?6:2)}</b><div class="${isUp?'up':'down'}">${isUp?'+':''}${parseFloat(i.P).toFixed(2)}%</div></div>
                 `;
             });
         };
     </script>
     """, height=450)
 
-# --- Tab 2: 极速交易 (独立双滑块 + 下单成功提示) ---
+# --- 交易下单 (独立双金额滑块) ---
 with tabs[1]:
     target_coin = st.selectbox("搜索币种", all_coins, index=all_coins.index("BTCUSDT"))
     st.components.v1.html(f"""
@@ -226,14 +227,14 @@ with tabs[1]:
         <script>new TradingView.widget({{"autosize":true,"symbol":"BINANCE:{target_coin}","interval":"1","theme":"light","style":"1","hide_top_toolbar":true,"container_id":"tv"}});</script>
     """, height=320)
     
-    st.markdown(f"**可用现金: {st.session_state.balance:,.2f} USDT**")
+    st.markdown(f"**可用余额: {st.session_state.balance:,.2f} USDT**")
     
-    # 独立双滑块
-    actual_margin = st.slider("1. 投入保证金金额 (USDT)", 0.0, float(st.session_state.balance), float(st.session_state.balance * 0.1), step=10.0)
+    # 🌟 独立双滑块
+    actual_margin = st.slider("1. 投入本金 (保证金金额)", 0.0, float(st.session_state.balance), float(st.session_state.balance * 0.1), step=10.0)
     leverage = st.slider("2. 杠杆倍数 (Leverage)", 1, 1000, 100)
     
     notional = actual_margin * leverage
-    st.markdown(f"<div style='background:#F2F2F7; padding:12px; border-radius:12px; margin-bottom:15px;'>开仓总额: <b style='color:#007AFF;'>{notional:,.2f} USDT</b></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='background:#F2F2F7; padding:12px; border-radius:12px; margin-bottom:15px;'>开仓总价值: <b style='color:#007AFF;'>{notional:,.2f} USDT</b></div>", unsafe_allow_html=True)
     
     cb1, cb2 = st.columns(2)
     with cb1:
@@ -242,27 +243,22 @@ with tabs[1]:
             if p > 0 and st.session_state.balance >= actual_margin:
                 st.session_state.balance -= actual_margin
                 st.session_state.positions.append({"交易对":target_coin,"方向":"多","开仓价":p,"杠杆":leverage,"名义价值":notional,"占用保证金":actual_margin})
-                sync_data()
-                st.success(f"✅ 做多成功！成交价: {p}") # 成功小提示
-                time.sleep(1); st.rerun()
+                sync_data(); st.success(f"做多成功！价格: {p}"); time.sleep(1); st.rerun()
     with cb2:
         if st.button("做空 (Short) 🔴", use_container_width=True):
             p = get_price(target_coin)
             if p > 0 and st.session_state.balance >= actual_margin:
                 st.session_state.balance -= actual_margin
                 st.session_state.positions.append({"交易对":target_coin,"方向":"空","开仓价":p,"杠杆":leverage,"名义价值":notional,"占用保证金":actual_margin})
-                sync_data()
-                st.success(f"✅ 做空成功！成交价: {p}") # 成功小提示
-                time.sleep(1); st.rerun()
+                sync_data(); st.success(f"做空成功！价格: {p}"); time.sleep(1); st.rerun()
 
-# --- Tab 3: 资产中心 ---
+# --- 持仓中心 ---
 with tabs[2]:
-    st.button("重置 5,000,000 U 账户", on_click=lambda: (st.session_state.update({"balance":5000000.0,"positions":[]}), sync_data()), use_container_width=True)
+    st.button("重置 500 万 U 账户", on_click=lambda: (st.session_state.update({"balance":5000000.0,"positions":[]}), sync_data()), use_container_width=True)
     
     if not st.session_state.positions:
-        st.info("暂无活跃持仓")
+        st.info("暂无持仓")
     else:
-        # 获取实时行情用于计算资产卡片
         try:
             r_p = requests.get("https://data-api.binance.vision/api/v3/ticker/price", timeout=2).json()
             p_map = {x['symbol']: float(x['price']) for x in r_p}
@@ -290,8 +286,7 @@ with tabs[2]:
                         st.session_state.positions.pop(i); sync_data(); st.rerun()
                 with m2:
                     with st.popover("调整", use_container_width=True):
-                        adj_val = st.slider("调整本金金额 (USDT)", 0.0, float(st.session_state.balance if st.session_state.balance > 0 else 1000), 10.0, key=f"adj_s_{i}")
-                        st.write(f"对应总价值: {adj_val * pos['杠杆']:,.2f}")
+                        adj_val = st.slider("金额 (USDT)", 0.0, float(st.session_state.balance if st.session_state.balance > 0 else 1000), 10.0, key=f"adj_s_{i}")
                         if st.button("补仓 (Add)", key=f"ad_{i}", use_container_width=True):
                             if st.session_state.balance >= adj_val:
                                 st.session_state.balance -= adj_val
