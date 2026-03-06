@@ -217,14 +217,14 @@ with tab_market:
 with tab_trade:
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
     
-    # 🌟 核心升级点：将 "interval": "1" 改为了 "interval": "1S"，开启每秒刷新一根 K 线图！
+    # 🌟 修复：退回免费版支持的最低时间级别（1分钟线），当前价格线依然是实时跳动的！
     st.components.v1.html(
         f"""
         <div class="tradingview-widget-container" style="height:350px;width:100%">
           <div id="tv_{tv_symbol}" style="height:calc(100% - 32px);width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
-          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1S", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117"}});
+          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117"}});
         </script></div>
         """, height=350
     )
@@ -388,3 +388,4 @@ with tab_assets:
         </script>
         """, height=600
     )
+
