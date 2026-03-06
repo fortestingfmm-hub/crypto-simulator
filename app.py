@@ -212,19 +212,28 @@ with tab_market:
     )
 
 # ==========================================
-# 模块 2: 极速交易面板 (1秒级图表)
+# 模块 2: 极速交易面板 (恢复原版稳定的 K 线图配置)
 # ==========================================
 with tab_trade:
     tv_symbol = st.selectbox("选择交易对", all_symbols, format_func=lambda x: x.replace("USDT", "/USDT"), label_visibility="collapsed")
     
-    # 🌟 修复：退回免费版支持的最低时间级别（1分钟线），当前价格线依然是实时跳动的！
+    # 🌟 核心修复：带回了 interval: "1" 和 container_id 绑定，K线图完美复活
     st.components.v1.html(
         f"""
         <div class="tradingview-widget-container" style="height:350px;width:100%">
           <div id="tv_{tv_symbol}" style="height:calc(100% - 32px);width:100%"></div>
           <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
           <script type="text/javascript">
-          new TradingView.widget({{"autosize": true, "symbol": "BINANCE:{tv_symbol}", "interval": "1", "theme": "dark", "style": "1", "hide_top_toolbar": true, "backgroundColor": "#0E1117"}});
+          new TradingView.widget({{
+            "autosize": true, 
+            "symbol": "BINANCE:{tv_symbol}", 
+            "interval": "1", 
+            "theme": "dark", 
+            "style": "1", 
+            "hide_top_toolbar": true, 
+            "backgroundColor": "#0E1117", 
+            "container_id": "tv_{tv_symbol}"
+          }});
         </script></div>
         """, height=350
     )
@@ -388,4 +397,3 @@ with tab_assets:
         </script>
         """, height=600
     )
-
