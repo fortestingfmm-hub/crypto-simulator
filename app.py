@@ -10,7 +10,7 @@ from urllib.parse import quote
 from datetime import datetime
 
 # ==========================================
-# 0. UI 配置 - Apple 极简白 (100% 静默模式)
+# 0. UI 配置 - Apple 极简白 (100% 沉浸式静默)
 # ==========================================
 st.set_page_config(page_title="Crypto Terminal Pro", layout="centered", initial_sidebar_state="collapsed")
 
@@ -19,16 +19,15 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;600&display=swap');
     html, body, [data-testid="stAppViewContainer"] { background-color: #F5F5F7; font-family: 'SF Pro Display', sans-serif; color: #1D1D1F; }
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
-    .apple-card { background: #FFFFFF; border-radius: 20px; padding: 20px; margin-bottom: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.01); }
+    .apple-card { background: #FFFFFF; border-radius: 20px; padding: 18px; margin-bottom: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.01); }
     .balance-header { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 24px; padding: 20px; text-align: center; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.05); }
     .ai-box { background: #FFFFFF; border-radius: 18px; padding: 15px; margin-bottom: 15px; border-left: 5px solid #007AFF; box-shadow: 0 4px 12px rgba(0,0,0,0.02); }
     .price-up { color: #34C759 !important; font-weight: 600; }
     .price-down { color: #FF3B30 !important; font-weight: 600; }
     .stButton>button { border-radius: 12px; background-color: #007AFF; color: white; font-weight: 600; border: none; }
     
-    /* 🛠 绝密：彻底封印所有刷新和加载提示 */
-    header { visibility: hidden; }
-    footer { visibility: hidden; }
+    /* 屏蔽所有加载指示器 */
+    header { visibility: hidden; } footer { visibility: hidden; }
     div[data-testid="stStatusWidget"] { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
     .stSpinner { display: none !important; }
@@ -36,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 核心持久化引擎
+# 1. 核心持久化引擎 (锁定文件名)
 # ==========================================
 DEEPSEEK_KEY = "sk-9de5a0aa88744f7d94fc2a3a6b140f75"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
@@ -51,7 +50,8 @@ def load_db():
     except: return {"users": {}}
 
 def save_db(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(DATA_FILE, "w", encoding="utf-8") as f: 
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 def sync_data():
     if st.session_state.get('logged_in'):
@@ -65,7 +65,7 @@ def sync_data():
             save_db(db)
 
 # ==========================================
-# 2. 账号系统 (Token 记忆)
+# 2. 账号系统
 # ==========================================
 if 'logged_in' not in st.session_state:
     st.session_state.update({"logged_in": False, "history": [], "favorites": [], "chat_history": []})
@@ -89,7 +89,7 @@ if not st.session_state.logged_in:
         with st.form("l_f"):
             u = st.text_input("用户名").strip()
             p = st.text_input("密码", type="password").strip()
-            if st.form_submit_button("登录终端", use_container_width=True):
+            if st.form_submit_button("进入终端", use_container_width=True):
                 hp = hashlib.sha256(p.encode()).hexdigest()
                 db = load_db()
                 if u in db["users"] and db["users"][u]["password"] == hp:
@@ -102,7 +102,7 @@ if not st.session_state.logged_in:
         with st.form("r_f"):
             nu = st.text_input("设置用户名").strip()
             np = st.text_input("设置密码", type="password").strip()
-            if st.form_submit_button("注册"):
+            if st.form_submit_button("注册新账户"):
                 db = load_db()
                 if nu in db["users"]: st.error("已占用")
                 elif nu and np:
@@ -111,50 +111,46 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# 3. 极速行情函数
+# 3. 极速行情快照
 # ==========================================
 @st.cache_data(ttl=1)
 def get_market_snapshot():
     try:
-        res = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=1).json()
+        res = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=1.5).json()
         df = pd.DataFrame(res)
         df = df[df['symbol'].str.endswith('USDT')]
-        df[['lastPrice', 'priceChangePercent']] = df[['lastPrice', 'priceChangePercent']].astype(float)
+        df[['lastPrice', 'priceChangePercent', 'quoteVolume']] = df[['lastPrice', 'priceChangePercent', 'quoteVolume']].astype(float)
         return df
     except: return pd.DataFrame()
 
 # ==========================================
-# 4. 局部静默刷新 (Fragments)
+# 4. 局部静默刷新碎片 (Fragments)
 # ==========================================
 
-@st.fragment(run_every=1) # 🌟 1秒/次 静默重算权益
-def silent_equity_board():
+@st.fragment(run_every=1)
+def fragment_equity_board():
     m_df = get_market_snapshot()
     total_pnl = 0.0
     total_margin = 0.0
     for p in st.session_state.positions:
         now_p = m_df[m_df['symbol'] == p['交易对']]['lastPrice'].values[0] if not m_df.empty and p['交易对'] in m_df['symbol'].values else p['开仓价']
         pnl = (now_p - p['开仓价']) / p['开仓价'] * p['名义价值'] if p['方向'] == "多" else (p['开仓价'] - now_p) / p['开仓价'] * p['名义价值']
-        total_pnl += pnl
-        total_margin += p['占用保证金']
+        total_pnl += pnl; total_margin += p['占用保证金']
     
-    equity = st.session_state.balance + total_margin + total_pnl
     st.markdown(f"""
     <div class="balance-header">
         <div class="text-secondary">实时总权益净值 (USDT)</div>
-        <div style="font-size: 2.2rem; font-weight: 600; color: #1D1D1F; letter-spacing: -1.2px;">{equity:,.2f}</div>
+        <div style="font-size: 2.2rem; font-weight: 600; color: #1D1D1F; letter-spacing: -1.2px;">{st.session_state.balance + total_margin + total_pnl:,.2f}</div>
         <div style="display:flex; justify-content:center; gap:15px; margin-top:5px; font-size:0.8rem;">
-            <span>现金: <b>{st.session_state.balance:,.2f}</b></span>
+            <span>可用现金: <b>{st.session_state.balance:,.2f}</b></span>
             <span class="{'price-up' if total_pnl>=0 else 'price-down'}">未实现盈亏: {total_pnl:+.2f}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 5. 主布局渲染
+# 5. 主页面渲染
 # ==========================================
-
-
 c_u, c_s = st.columns([7, 2])
 with c_u: st.markdown(f"**{st.session_state.username}** · 终端模式")
 with c_s:
@@ -162,17 +158,16 @@ with c_s:
         if st.button("🔄 重置"): st.session_state.update({"balance":5000000.0,"positions":[],"history":[]}); sync_data(); st.rerun()
         if st.button("🚪 退出"): st.query_params.clear(); st.session_state.clear(); st.rerun()
 
-# 资产看板 (默默跳动)
-silent_equity_board()
+fragment_equity_board()
 
 # AI 投顾
 with st.container():
     st.markdown('<div class="ai-box">🤖 <b>DeepSeek 智能投顾</b>', unsafe_allow_html=True)
     a1, a2 = st.columns([4, 1])
-    u_q = a1.text_input("咨询 AI 关于行情...", key="ds_input", label_visibility="collapsed")
+    u_q = a1.text_input("向 AI 咨询行情建议...", key="ds_input", label_visibility="collapsed")
     if a2.button("发送", use_container_width=True) and u_q:
         try:
-            sys_msg = "你是中文专家。简短回答建议。"
+            sys_msg = "你是中文专家。简短专业建议。"
             headers = {"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"}
             payload = {"model": "deepseek-chat", "messages": [{"role":"system","content":sys_msg}, {"role":"user","content":u_q}]}
             res = requests.post(DEEPSEEK_URL, headers=headers, json=payload, timeout=10)
@@ -184,28 +179,43 @@ with st.container():
             with st.chat_message(m["role"]): st.markdown(m["content"])
     st.markdown('</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["📊 实时行情", "📈 极速交易", "💼 仓位管理", "📜 历史记录"])
+tabs = st.tabs(["📊 行情分类", "📈 极速交易", "💼 仓位管理", "📜 历史记录"])
 
-with tabs[0]: # 🌟 毫秒 WebSocket (修复 TypeError：去除了 key)
-    st.components.v1.html("""
-    <style>body { background: transparent; font-family: -apple-system, sans-serif; margin:0; } .list { height: 420px; overflow-y: auto; } .item { display: flex; justify-content: space-between; padding: 16px 8px; border-bottom: 1px solid #E5E5E7; }</style>
-    <div id="l" class="list"></div>
-    <script>
-        const b = document.getElementById('l');
-        const ws = new WebSocket('wss://data-stream.binance.vision:9443/ws/!ticker@arr');
-        let c = {};
-        ws.onmessage = (e) => {
-            JSON.parse(e.data).filter(i => i.s.endswith('USDT')).sort((x, y) => parseFloat(y.q) - parseFloat(x.q)).slice(0, 60).forEach(i => {
-                if(!c[i.s]) { let d = document.createElement('div'); d.className = 'item'; b.appendChild(d); c[i.s] = d; }
-                const up = parseFloat(i.P) >= 0;
-                c[i.s].innerHTML = `<b>${i.s.replace('USDT','')}</b><div style="text-align:right"><b>$${parseFloat(i.c).toFixed(2)}</b><div style="color:${up?'#34C759':'#FF3B30'}">${up?'+':''}${parseFloat(i.P).toFixed(2)}%</div></div>`;
-            });
-        };
-    </script>
-    """, height=450)
-
-with tabs[1]: # 交易
+# --- Tab 0: 恢复后的分类行情 ---
+with tabs[0]:
+    m_tabs = st.tabs(["⭐ 自选", "🔥 涨幅榜", "💎 主流", "🆕 新币", "🌐 DEX"])
     m_df = get_market_snapshot()
+    
+    def render_market_list(df_subset, tag):
+        if df_subset.empty: 
+            st.caption("暂无数据")
+            return
+        for _, r in df_subset.iterrows():
+            with st.container():
+                c1, c2, c3 = st.columns([1, 4, 3])
+                is_fav = r['symbol'] in st.session_state.favorites
+                if c1.button("⭐" if is_fav else "☆", key=f"f_{tag}_{r['symbol']}"):
+                    if is_fav: st.session_state.favorites.remove(r['symbol'])
+                    else: st.session_state.favorites.append(r['symbol'])
+                    sync_data(); st.rerun()
+                c2.markdown(f"**{r['symbol'].replace('USDT','')}**")
+                up = r['priceChangePercent'] >= 0
+                c3.markdown(f"<div style='text-align:right'><b>${r['lastPrice']:.2f}</b><br><span class='{'price-up' if up else 'price-down'}'>{r['priceChangePercent']:+.2f}%</span></div>", unsafe_allow_html=True)
+
+    with m_tabs[0]: # 自选
+        render_market_list(m_df[m_df['symbol'].isin(st.session_state.favorites)], "fav")
+    with m_tabs[1]: # 涨幅榜
+        render_market_list(m_df.sort_values('priceChangePercent', ascending=False).head(20), "gain")
+    with m_tabs[2]: # 主流币 (按成交量前15)
+        render_market_list(m_df.sort_values('quoteVolume', ascending=False).head(15), "main")
+    with m_tabs[3]: # 新币 (取列表底部 15 个，模拟币安新上线顺序)
+        render_market_list(m_df.tail(15), "new")
+    with m_tabs[4]: # DEX
+        dex_set = ["UNIUSDT","CAKEUSDT","SUSHIUSDT","AAVEUSDT","CRVUSDT","RAYUSDT","JOEUSDT","1INCHUSDT"]
+        render_market_list(m_df[m_df['symbol'].isin(dex_set)], "dex")
+
+# --- Tab 1: 极速交易 ---
+with tabs[1]:
     all_syms = m_df['symbol'].tolist() if not m_df.empty else ["BTCUSDT"]
     target = st.selectbox("选择资产", all_syms, index=all_syms.index("BTCUSDT") if "BTCUSDT" in all_syms else 0)
     st.components.v1.html(f"""
@@ -213,7 +223,7 @@ with tabs[1]: # 交易
         <script src="https://s3.tradingview.com/tv.js"></script>
         <script>new TradingView.widget({{"autosize":true,"symbol":"BINANCE:{target}","interval":"1","theme":"light","style":"1","hide_top_toolbar":true,"container_id":"tv"}});</script>
     """, height=320)
-    st.markdown(f"**现金余额: {st.session_state.balance:,.2f} USDT**")
+    st.markdown(f"**现金可用: {st.session_state.balance:,.2f} USDT**")
     act_m = st.slider("1. 投入保证金 (USDT)", 0.0, float(st.session_state.balance), float(st.session_state.balance * 0.1), step=100.0)
     lev = st.slider("2. 选择杠杆倍数", 1, 1000, 100)
     st.markdown(f"<div style='background:#F2F2F7; padding:15px; border-radius:12px; margin-bottom:15px;'>成交估值: <b style='color:#007AFF;'>{act_m * lev:,.2f} U</b></div>", unsafe_allow_html=True)
@@ -224,17 +234,18 @@ with tabs[1]: # 交易
             if p > 0 and st.session_state.balance >= act_m:
                 st.session_state.balance -= act_m
                 st.session_state.positions.append({"交易对":target,"方向":"多","开仓价":p,"杠杆":lev,"名义价值":act_m*lev,"占用保证金":act_m})
-                sync_data(); st.success(f"成交: {p}"); time.sleep(0.5); st.rerun()
+                sync_data(); st.success(f"已开多: {p}"); time.sleep(0.5); st.rerun()
     with c2:
         if st.button("做空 🔴", use_container_width=True):
             p = m_df[m_df['symbol']==target]['lastPrice'].values[0] if not m_df.empty else 0.0
             if p > 0 and st.session_state.balance >= act_m:
                 st.session_state.balance -= act_m
                 st.session_state.positions.append({"交易对":target,"方向":"空","开仓价":p,"杠杆":lev,"名义价值":act_m*lev,"占用保证金":act_m})
-                sync_data(); st.success(f"成交: {p}"); time.sleep(0.5); st.rerun()
+                sync_data(); st.success(f"已开空: {p}"); time.sleep(0.5); st.rerun()
 
-@st.fragment(run_every=1)
-def silent_positions():
+# --- Tab 2: 仓位管理 (局部刷新) ---
+@st.fragment(run_every=2)
+def fragment_positions():
     if not st.session_state.positions: st.info("暂无持仓")
     else:
         m_df = get_market_snapshot()
@@ -262,7 +273,7 @@ def silent_positions():
                             sync_data(); st.rerun()
 
 with tabs[2]:
-    silent_positions()
+    fragment_positions()
 
 with tabs[3]:
     st.markdown("#### 📜 历史记录")
